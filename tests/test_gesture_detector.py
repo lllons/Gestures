@@ -55,6 +55,28 @@ class GestureDetectorActivationTests(unittest.TestCase):
         self.assertFalse(released.pinch_awaiting_release)
         self.assertTrue(second.pinch_triggered)
 
+    def test_spread_index_and_middle_fingers_report_scroll_direction(self) -> None:
+        detector = GestureDetector(AppSettings())
+
+        first = detector.process([self._scroll_hand(0.0)], None, now=20.0)
+        moved = detector.process([self._scroll_hand(0.12)], None, now=20.1)
+
+        self.assertTrue(first.scroll_active)
+        self.assertEqual(first.scroll_delta_y, 0.0)
+        self.assertTrue(moved.scroll_active)
+        self.assertGreater(moved.scroll_delta_y, 0.0)
+        self.assertAlmostEqual(moved.scroll_delta_x, 0.0)
+
+    @staticmethod
+    def _scroll_hand(offset_y: float) -> HandDetection:
+        landmarks = [Landmark(0.0, 0.0) for _ in range(21)]
+        landmarks[0] = Landmark(0.0, offset_y)
+        landmarks[4] = Landmark(0.0, offset_y)
+        landmarks[8] = Landmark(0.2, 0.5 + offset_y)
+        landmarks[9] = Landmark(0.0, 1.0 + offset_y)
+        landmarks[12] = Landmark(0.9, 0.5 + offset_y)
+        return HandDetection(landmarks=tuple(landmarks))
+
     @staticmethod
     def _pinch_hand() -> HandDetection:
         return GestureDetectorActivationTests._hand_with_thumb_index(0.2, 0.2)

@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import ctypes
 import os
+from typing import Any
+
 from .hand_tracker import Landmark
+
+
+_WHEEL_DELTA = 120
+_MOUSEEVENTF_LEFTDOWN = 0x0002
+_MOUSEEVENTF_LEFTUP = 0x0004
+_MOUSEEVENTF_WHEEL = 0x0800
+_MOUSEEVENTF_HWHEEL = 0x01000
 
 
 class MouseController:
@@ -20,23 +29,68 @@ class MouseController:
 
         self._mouse = mouse
         self._controller = mouse.Controller()
+        self._user32 = _windows_user32()
         self._origin_x, self._origin_y, self._width, self._height = _screen_geometry()
+        self._scroll_remainder_x = 0.0
+        self._scroll_remainder_y = 0.0
 
     def move_to(self, point: Landmark) -> None:
         """Map a normalized camera landmark to the virtual desktop."""
 
-        self._controller.position = map_normalized_to_screen(
+        position = map_normalized_to_screen(
             point,
             self._origin_x,
             self._origin_y,
             self._width,
             self._height,
         )
+        if self._user32 is not None:
+            # SetCursorPos avoids the active-window-dependent path that can make
+            # pynput pointer updates feel slower outside the Gestures window.
+            self._user32.SetCursorPos(position[0], position[1])
+        else:
+            self._controller.position = position
 
     def click(self) -> None:
         """Click once at the current pointer location."""
 
-        self._controller.click(self._mouse.Button.left, 1)
+        if self._user32 is not None:
+            self._user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            self._user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        else:
+            self._controller.click(self._mouse.Button.left, 1)
+
+    def scroll(self, horizontal_units: float, vertical_units: float) -> None:
+        """Scroll by fractional wheel units, preserving sub-unit motion."""
+
+        self._scroll_remainder_x += horizontal_units
+        self._scroll_remainder_y += vertical_units
+        whole_x = int(self._scroll_remainder_x)
+        whole_y = int(self._scroll_remainder_y)
+        self._scroll_remainder_x -= whole_x
+        self._scroll_remainder_y -= whole_y
+        if whole_x == 0 and whole_y == 0:
+            return
+
+        if self._user32 is not None:
+            if whole_y:
+                self._user32.mouse_event(
+                    _MOUSEEVENTF_WHEEL,
+                    0,
+                    0,
+                    whole_y * _WHEEL_DELTA,
+                    0,
+                )
+            if whole_x:
+                self._user32.mouse_event(
+                    _MOUSEEVENTF_HWHEEL,
+                    0,
+                    0,
+                    whole_x * _WHEEL_DELTA,
+                    0,
+                )
+        else:
+            self._controller.scroll(whole_x, whole_y)
 
 
 def map_normalized_to_screen(
@@ -58,12 +112,21 @@ def map_normalized_to_screen(
     )
 
 
+def _windows_user32() -> Any:
+    if os.name != "nt":
+        return None
+    try:
+        return ctypes.windll.user32
+    except (AttributeError, OSError):
+        return None
+
+
 def _screen_geometry() -> tuple[int, int, int, int]:
     """Return the virtual desktop origin and size, with a safe fallback."""
 
-    if os.name == "nt":
+    user32 = _windows_user32()
+    if user32 is not None:
         try:
-            user32 = ctypes.windll.user32
             origin_x = int(user32.GetSystemMetrics(76))
             origin_y = int(user32.GetSystemMetrics(77))
             width = int(user32.GetSystemMetrics(78))

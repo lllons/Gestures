@@ -16,6 +16,7 @@ from .face_tracker import FaceDetection
 from .hand_tracker import (
     INDEX_FINGER_TIP_INDEX,
     MIDDLE_FINGER_MCP_INDEX,
+    MIDDLE_FINGER_TIP_INDEX,
     THUMB_TIP_INDEX,
     WRIST_INDEX,
     HandDetection,
@@ -51,6 +52,10 @@ class GestureSnapshot:
     pinch_triggered: bool = False
     pinch_cooldown_remaining_ms: int = 0
     pinch_awaiting_release: bool = False
+    scroll_active: bool = False
+    finger_separation: float | None = None
+    scroll_delta_x: float = 0.0
+    scroll_delta_y: float = 0.0
 
 
 class LandmarkSmoother:
@@ -85,6 +90,9 @@ class GestureDetector:
     RELEASE_CONFIRM_SECONDS = 0.12
     PINCH_THRESHOLD = 0.35
     PINCH_RELEASE_THRESHOLD = 0.55
+    SCROLL_FINGER_SEPARATION_THRESHOLD = 0.65
+    SCROLL_DEADZONE = 0.001
+    SCROLL_SENSITIVITY = 80.0
 
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -101,6 +109,11 @@ class GestureDetector:
         self._frame_pinch_triggered = False
         self._frame_pinch_cooldown_remaining_ms = 0
         self._frame_pinch_awaiting_release = False
+        self._previous_scroll_anchor: Landmark | None = None
+        self._frame_scroll_active = False
+        self._frame_finger_separation: float | None = None
+        self._frame_scroll_delta_x = 0.0
+        self._frame_scroll_delta_y = 0.0
 
     def update_settings(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -115,6 +128,7 @@ class GestureDetector:
         self._pinch_cooldown_until = 0.0
         self._pinch_awaiting_release = False
         self._pinch_release_started_at = None
+        self._previous_scroll_anchor = None
 
     def process(
         self,
@@ -137,6 +151,27 @@ class GestureDetector:
         pinch_detected = (
             pinch_distance is not None and pinch_distance <= self.PINCH_THRESHOLD
         )
+        finger_separation = normalized_finger_separation(selected_hand)
+        scroll_active = (
+            finger_separation is not None
+            and finger_separation >= self.SCROLL_FINGER_SEPARATION_THRESHOLD
+        )
+        self._frame_finger_separation = finger_separation
+        self._frame_scroll_active = scroll_active
+        self._frame_scroll_delta_x = 0.0
+        self._frame_scroll_delta_y = 0.0
+        if scroll_active and selected_hand is not None:
+            scroll_anchor = _finger_pair_center(selected_hand)
+            if self._previous_scroll_anchor is not None:
+                self._frame_scroll_delta_x = scroll_anchor.x - self._previous_scroll_anchor.x
+                self._frame_scroll_delta_y = scroll_anchor.y - self._previous_scroll_anchor.y
+                if abs(self._frame_scroll_delta_x) < self.SCROLL_DEADZONE:
+                    self._frame_scroll_delta_x = 0.0
+                if abs(self._frame_scroll_delta_y) < self.SCROLL_DEADZONE:
+                    self._frame_scroll_delta_y = 0.0
+            self._previous_scroll_anchor = scroll_anchor
+        else:
+            self._previous_scroll_anchor = None
         self._frame_pinch_distance = pinch_distance
         self._frame_pinch_detected = pinch_detected
         self._frame_pinch_triggered = False
@@ -147,6 +182,10 @@ class GestureDetector:
             self.reset()
             self._frame_pinch_detected = False
             self._frame_pinch_awaiting_release = False
+            self._frame_scroll_active = False
+            self._frame_finger_separation = finger_separation
+            self._frame_scroll_delta_x = 0.0
+            self._frame_scroll_delta_y = 0.0
             return self._snapshot(
                 state=DetectionState.READY,
                 hands=hands,
@@ -299,6 +338,10 @@ class GestureDetector:
             pinch_triggered=self._frame_pinch_triggered,
             pinch_cooldown_remaining_ms=self._frame_pinch_cooldown_remaining_ms,
             pinch_awaiting_release=self._frame_pinch_awaiting_release,
+            scroll_active=self._frame_scroll_active,
+            finger_separation=self._frame_finger_separation,
+            scroll_delta_x=self._frame_scroll_delta_x,
+            scroll_delta_y=self._frame_scroll_delta_y,
         )
 
     def _update_pinch(
@@ -360,12 +403,42 @@ def normalized_pinch_distance(hand: HandDetection | None) -> float | None:
         return None
     thumb = hand.landmarks[THUMB_TIP_INDEX]
     index = hand.landmarks[INDEX_FINGER_TIP_INDEX]
-    wrist = hand.landmarks[WRIST_INDEX]
-    middle_mcp = hand.landmarks[MIDDLE_FINGER_MCP_INDEX]
-    palm_length = _distance(wrist, middle_mcp)
+    palm_length = _palm_length(hand)
     if palm_length <= 0:
         return None
     return _distance(thumb, index) / palm_length
+
+
+def normalized_finger_separation(hand: HandDetection | None) -> float | None:
+    """Return index/middle fingertip separation normalized by palm length."""
+
+    if hand is None or len(hand.landmarks) <= MIDDLE_FINGER_TIP_INDEX:
+        return None
+    index = hand.landmarks[INDEX_FINGER_TIP_INDEX]
+    middle = hand.landmarks[MIDDLE_FINGER_TIP_INDEX]
+    palm_length = _palm_length(hand)
+    if palm_length <= 0:
+        return None
+    return _distance(index, middle) / palm_length
+
+
+def _palm_length(hand: HandDetection) -> float:
+    if len(hand.landmarks) <= MIDDLE_FINGER_MCP_INDEX:
+        return 0.0
+    return _distance(
+        hand.landmarks[WRIST_INDEX],
+        hand.landmarks[MIDDLE_FINGER_MCP_INDEX],
+    )
+
+
+def _finger_pair_center(hand: HandDetection) -> Landmark:
+    index = hand.landmarks[INDEX_FINGER_TIP_INDEX]
+    middle = hand.landmarks[MIDDLE_FINGER_TIP_INDEX]
+    return Landmark(
+        x=(index.x + middle.x) / 2,
+        y=(index.y + middle.y) / 2,
+        z=(index.z + middle.z) / 2,
+    )
 
 
 def _closest_pinch_distance(hands: list[HandDetection]) -> float | None:

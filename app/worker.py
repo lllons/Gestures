@@ -22,6 +22,7 @@ from .gesture_detector import (
     DetectionState,
     GestureDetector,
     GestureSnapshot,
+    normalized_finger_separation,
     normalized_pinch_distance,
 )
 from .hand_tracker import HandDetection, HandTracker
@@ -216,6 +217,23 @@ class CameraWorker:
                         mouse_controller.move_to(snapshot.index_tip)
                     except Exception as exc:
                         self._notify("warning", f"Air Mouse movement stopped: {exc}")
+                        mouse_controller = None
+
+                if (
+                    settings.air_mouse_enabled
+                    and settings.detection_enabled
+                    and not is_calibrating
+                    and mouse_controller is not None
+                    and snapshot.scroll_active
+                    and (snapshot.scroll_delta_x or snapshot.scroll_delta_y)
+                ):
+                    try:
+                        mouse_controller.scroll(
+                            snapshot.scroll_delta_x * GestureDetector.SCROLL_SENSITIVITY,
+                            -snapshot.scroll_delta_y * GestureDetector.SCROLL_SENSITIVITY,
+                        )
+                    except Exception as exc:
+                        self._notify("warning", f"Air Mouse scrolling stopped: {exc}")
                         mouse_controller = None
 
                 if snapshot.triggered and keyboard is not None:
@@ -452,6 +470,24 @@ def _draw_overlay(
                 pinch_color,
                 3,
             )
+        if len(hand.landmarks) > 12:
+            index = hand.landmarks[8]
+            middle = hand.landmarks[12]
+            finger_separation = normalized_finger_separation(hand)
+            scroll_color = (
+                (0, 255, 0)
+                if finger_separation is not None
+                and finger_separation
+                >= GestureDetector.SCROLL_FINGER_SEPARATION_THRESHOLD
+                else (255, 170, 40)
+            )
+            cv2.line(
+                frame,
+                (_px(index.x, width), _px(index.y, height)),
+                (_px(middle.x, width), _px(middle.y, height)),
+                scroll_color,
+                3,
+            )
         for point in hand.landmarks:
             cv2.circle(
                 frame,
@@ -489,6 +525,17 @@ def _draw_overlay(
             frame,
             "PINCH ACTIVE",
             (18, 62),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+    if snapshot.scroll_active:
+        cv2.putText(
+            frame,
+            "SCROLL ACTIVE",
+            (18, 88),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (0, 255, 0),
@@ -535,6 +582,11 @@ def _draw_overlay(
         if snapshot.nose is not None and snapshot.face_scale:
             zone_radius = max(4, int(snapshot.face_scale * width * settings.touch_threshold))
             zone_text = f"{settings.touch_threshold * 100:.0f}% ({zone_radius}px)"
+        scroll_text = (
+            f"{snapshot.scroll_delta_x:.4f}, {snapshot.scroll_delta_y:.4f}"
+            if snapshot.scroll_active
+            else "--"
+        )
         debug_lines = (
             f"FPS: {fps:.1f}",
             f"Hand: {'yes' if snapshot.hand_detected else 'no'} ({snapshot.hand_count})",
@@ -542,6 +594,7 @@ def _draw_overlay(
             f"Distance: {distance}",
             f"Zone: {zone_text}",
             f"Pinch: {'yes' if snapshot.pinch_detected else 'no'}",
+            f"Scroll: {scroll_text}",
         )
         for line_number, text in enumerate(debug_lines, start=1):
             cv2.putText(

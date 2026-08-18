@@ -81,6 +81,7 @@ class GesturesApp:
         self.fps_var = tk.StringVar(value="0")
         self.cooldown_status_var = tk.StringVar(value="Released")
         self.pinch_var = tk.StringVar(value="Open")
+        self.scroll_var = tk.StringVar(value="Off")
         self.debug_text_var = tk.StringVar(value="No frames received yet.")
 
     def _build_styles(self) -> None:
@@ -158,7 +159,7 @@ class GesturesApp:
         self.air_mouse_button.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(
             preview_section,
-            text="Air Mouse: move your index finger to control the pointer; pinch thumb + index to click.",
+            text="Air Mouse: index finger controls the pointer; pinch thumb + index to click; spread index + middle and move to scroll.",
             style="Subtitle.TLabel",
             wraplength=760,
             justify=tk.LEFT,
@@ -242,6 +243,7 @@ class GesturesApp:
         self._metric(metrics, "FPS", self.fps_var, 3)
         self._metric(metrics, "Cooldown", self.cooldown_status_var, 4)
         self._metric(metrics, "Pinch", self.pinch_var, 5)
+        self._metric(metrics, "Scroll", self.scroll_var, 6)
 
         ttk.Separator(sidebar).pack(fill=tk.X, pady=(0, 15))
         ttk.Label(sidebar, text="SETTINGS", style="PanelTitle.TLabel").pack(anchor="w", pady=(0, 8))
@@ -531,6 +533,7 @@ class GesturesApp:
         self.fps_var.set("0")
         self.cooldown_status_var.set("Released")
         self.pinch_var.set("Open")
+        self.scroll_var.set("Off")
 
     def calibrate(self) -> None:
         if not self.worker.is_running():
@@ -633,6 +636,9 @@ class GesturesApp:
                 else ("Release" if snapshot.pinch_awaiting_release else "Open")
             )
         )
+        self.scroll_var.set(
+            "Active" if snapshot.scroll_active else "Off"
+        )
         self._update_debug(result)
 
         if result.preview_frame is not None and self.preview_var.get():
@@ -653,6 +659,12 @@ class GesturesApp:
             if snapshot.pinch_distance is not None
             else "--"
         )
+        finger_separation = (
+            f"{snapshot.finger_separation:.3f}"
+            if snapshot.finger_separation is not None
+            else "--"
+        )
+        scroll_delta = f"{snapshot.scroll_delta_x:.4f}, {snapshot.scroll_delta_y:.4f}"
         text = "\n".join(
             (
                 f"FPS                 {result.fps:.1f}",
@@ -668,6 +680,9 @@ class GesturesApp:
                 f"Pinch cooldown      {snapshot.pinch_cooldown_remaining_ms} ms",
                 f"Pinch detected      {'yes' if snapshot.pinch_detected else 'no'}",
                 f"Pinch release       {'yes' if snapshot.pinch_awaiting_release else 'no'}",
+                f"Finger separation   {finger_separation}",
+                f"Scroll active       {'yes' if snapshot.scroll_active else 'no'}",
+                f"Scroll delta        {scroll_delta}",
             )
         )
         self.debug_box.configure(state=tk.NORMAL)

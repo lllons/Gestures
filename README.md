@@ -10,8 +10,9 @@ presses one configurable keyboard shortcut. A second configurable shortcut is
 sent when the thumb and index finger touch together. Both shortcuts default to
 `Alt + Tab` and can be changed from the GUI dropdowns. Each gesture fires once,
 then requires release before it can fire again. When **Air Mouse** is enabled,
-the index fingertip controls the OS pointer by camera position and a thumb-index
-pinch performs a left click at the pointer location.
+the index fingertip controls the OS pointer by camera position, a thumb-index
+pinch performs a left click at the pointer location, and spreading the index and
+middle fingers while moving scrolls in the direction of hand movement.
 
 ### QuickStart
 ##### In a folder of your choosing
@@ -70,7 +71,13 @@ The application does not open the webcam until **Start Detection** is pressed.
   0.35 and is re-armed after the fingers separate. In Air Mouse mode, the same
   pinch performs a left click instead of sending the pinch keyboard shortcut.
 - Air Mouse maps normalized index-fingertip coordinates directly to the virtual
-  desktop, clamping the pointer to the available screen bounds.
+  desktop, clamping the pointer to the available screen bounds. The Windows
+  cursor path uses direct OS calls so pointer response stays consistent when
+  another application is focused.
+- Spreading the index and middle fingertips at least 0.65 palm lengths apart
+  activates scrolling. Moving the hand down scrolls down; moving it up, left, or
+  right scrolls in the matching direction. The gesture is active only in Air
+  Mouse mode.
 - The default cooldown timer is 0 ms for immediate response; release hysteresis
   still prevents a held gesture from sending repeated shortcuts.
 - The activation zone size is 10% of face width by default, and the slider in
@@ -140,7 +147,7 @@ permission the first time.
 - **Air Mouse failure**: on Windows, allow Gestures to control the pointer and
   keep the index fingertip clearly visible. The pointer uses the mirrored camera
   coordinates, so moving your finger to the camera's top-right moves the pointer
-  to the screen's top-right.
+  to the screen's top-right. Spread the index and middle fingers to scroll.
 - **Slow FPS**: leave the preview off, use a 640×480 webcam mode, close other
   camera consumers, and allow MediaPipe to run on the CPU. The application does
   not require a dedicated GPU.
