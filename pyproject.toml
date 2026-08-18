@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "gestures-nose-touch"
 version = "1.0.0"
 description = "Local webcam nose-touch and universal two-hand 3D input controller"
+license = { file = "LICENSE" }
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "mediapipe>=0.10.30,<1.1",

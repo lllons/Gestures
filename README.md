@@ -177,4 +177,4 @@ scripts/
 requirements.txt
 ```
 
-Licence MIT
+License Apache License 2.0
