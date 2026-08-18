@@ -6,8 +6,10 @@
 ## This is a project that takes your hand location and face location and tracks them to see when they overlap.
 
 When the fingertip enters the forgiving nose touch zone, Gestures immediately
-presses one configurable keyboard shortcut by default. It fires once, enters a
-cooldown/release state, and will not fire again until the fingertip has moved away.
+presses one configurable keyboard shortcut. A second configurable shortcut is
+sent when the thumb and index finger touch together. Both shortcuts default to
+`Alt + Tab` and can be changed from the GUI dropdowns. Each gesture fires once,
+then requires release before it can fire again.
 
 ### QuickStart
 ##### In a folder of your choosing
@@ -44,9 +46,13 @@ The application does not open the webcam until **Start Detection** is pressed.
 - MediaPipe Hand Landmarker returns up to two hands and 21 landmarks per hand.
 - MediaPipe Face Landmarker returns a face mesh. Landmark 1 is used as the nose
   tip, and cheek landmarks 234 and 454 provide the face-width reference.
-- For every hand, only landmark 8 — the actual index-finger tip — is considered.
-  If two hands are visible, the hand whose index tip is closest to the detected
-  nose is selected.
+- For nose touch, landmark 8 — the actual index-finger tip — is considered for
+  every hand. If two hands are visible, the hand whose index tip is closest to
+  the detected nose is selected.
+- For the pinch gesture, landmark 4 (thumb tip) and landmark 8 (index tip) are
+  compared. Their distance is normalized by the wrist-to-middle-finger-palm
+  length so the gesture remains consistent as the hand moves closer to the
+  webcam.
 - The normalized Euclidean distance is calculated as:
 
   ```text
@@ -55,8 +61,13 @@ The application does not open the webcam until **Start Detection** is pressed.
 
   This avoids a raw-pixel threshold changing when the user moves closer to the
   webcam.
-- A moving average over five frames reduces jitter. The detector reports
-  `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`.
+- A moving average over five frames reduces nose-touch jitter. The detector
+  reports `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`, while the
+  pinch status is shown separately in the live diagnostics.
+- The pinch shortcut fires when the normalized thumb-index distance is at most
+  0.35 and is re-armed after the fingers separate.
+- The default cooldown timer is 0 ms for immediate response; release hysteresis
+  still prevents a held gesture from sending repeated shortcuts.
 - The activation zone size is 10% of face width by default, and the slider in
   the settings panel can increase it up to 50% for an even larger zone.
 - The default activation delay is 0 ms, so the first qualifying frame triggers
@@ -74,8 +85,9 @@ Settings are stored locally as JSON:
 ```
 
 On non-Windows development machines the fallback is `~/.gestures/settings.json`.
-The file contains UI values such as the camera index, threshold, shortcut, and
-calibration result. It does not contain camera frames. The optional **Start with
+The file contains UI values such as the camera index, activation zone, both
+shortcuts, and calibration result. It does not contain camera frames. The
+optional **Start with
 Windows** setting creates/removes a per-user `HKCU` Run entry and does not need
 administrator rights.
 

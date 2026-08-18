@@ -13,7 +13,7 @@ import cv2
 from PIL import Image, ImageTk
 
 from .camera import CameraInfo, enumerate_cameras
-from .keyboard_controller import ShortcutError, parse_shortcut
+from .keyboard_controller import SHORTCUT_OPTIONS, ShortcutError, parse_shortcut
 from .settings import AppSettings, SettingsError, SettingsStore
 from .startup import StartupError, set_start_with_windows
 from .worker import CameraWorker, FrameResult, WorkerEvent
@@ -65,6 +65,7 @@ class GesturesApp:
         self.debug_var = tk.BooleanVar(value=self.settings.debug_mode)
         self.startup_var = tk.BooleanVar(value=self.settings.start_with_windows)
         self.shortcut_var = tk.StringVar(value=self.settings.shortcut)
+        self.pinch_shortcut_var = tk.StringVar(value=self.settings.pinch_shortcut)
         self.threshold_var = tk.DoubleVar(value=self.settings.touch_threshold)
         self.duration_var = tk.DoubleVar(value=self.settings.touch_duration_ms)
         self.cooldown_var = tk.DoubleVar(value=self.settings.cooldown_ms)
@@ -76,6 +77,7 @@ class GesturesApp:
         self.distance_var = tk.StringVar(value="—")
         self.fps_var = tk.StringVar(value="0")
         self.cooldown_status_var = tk.StringVar(value="Released")
+        self.pinch_var = tk.StringVar(value="Open")
         self.debug_text_var = tk.StringVar(value="No frames received yet.")
 
     def _build_styles(self) -> None:
@@ -161,6 +163,7 @@ class GesturesApp:
         self._metric(metrics, "Distance", self.distance_var, 2)
         self._metric(metrics, "FPS", self.fps_var, 3)
         self._metric(metrics, "Cooldown", self.cooldown_status_var, 4)
+        self._metric(metrics, "Pinch", self.pinch_var, 5)
 
         ttk.Separator(sidebar).pack(fill=tk.X, pady=(0, 15))
         ttk.Label(sidebar, text="SETTINGS", style="PanelTitle.TLabel").pack(anchor="w", pady=(0, 8))
@@ -229,19 +232,16 @@ class GesturesApp:
             sidebar,
             "Cooldown (ms)",
             self.cooldown_var,
-            50,
+            0,
             3000,
             10,
         )
 
-        shortcut_row = ttk.Frame(sidebar, style="Panel.TFrame")
-        shortcut_row.pack(fill=tk.X, pady=(5, 3))
-        ttk.Label(shortcut_row, text="Shortcut", style="Panel.TLabel").pack(side=tk.LEFT)
-        self.shortcut_entry = ttk.Entry(shortcut_row, textvariable=self.shortcut_var, width=20)
-        self.shortcut_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(12, 0))
+        self._shortcut_control(sidebar, "Nose touch key", self.shortcut_var)
+        self._shortcut_control(sidebar, "Thumb + index key", self.pinch_shortcut_var)
         ttk.Label(
             sidebar,
-            text="Examples: Alt + Tab · Ctrl + Shift + S · Space · Escape",
+            text="Dropdowns include common shortcuts, letters, numbers, arrows, and function keys.",
             style="Muted.TLabel",
             wraplength=310,
         ).pack(anchor="w", pady=(0, 10))
@@ -281,6 +281,27 @@ class GesturesApp:
             state=tk.DISABLED,
         )
         self.debug_box.pack(fill=tk.BOTH, expand=True)
+
+    def _shortcut_control(
+        self,
+        parent: ttk.Frame,
+        label: str,
+        variable: tk.StringVar,
+    ) -> None:
+        row = ttk.Frame(parent, style="Panel.TFrame")
+        row.pack(fill=tk.X, pady=3)
+        ttk.Label(row, text=label, style="Panel.TLabel").pack(side=tk.LEFT)
+        values = list(SHORTCUT_OPTIONS)
+        current = variable.get().strip()
+        if current and current not in values:
+            values.insert(0, current)
+        ttk.Combobox(
+            row,
+            textvariable=variable,
+            values=values,
+            state="readonly",
+            width=18,
+        ).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(12, 0))
 
     def _metric(self, parent: ttk.Frame, label: str, variable: tk.StringVar, row: int) -> None:
         ttk.Label(parent, text=f"{label}:", style="Muted.TLabel").grid(
@@ -373,12 +394,14 @@ class GesturesApp:
             debug_mode=bool(self.debug_var.get()),
             start_with_windows=bool(self.startup_var.get()),
             shortcut=self.shortcut_var.get().strip(),
+            pinch_shortcut=self.pinch_shortcut_var.get().strip(),
             touch_threshold=round(float(self.threshold_var.get()), 3),
             touch_duration_ms=int(round(float(self.duration_var.get()))),
             cooldown_ms=int(round(float(self.cooldown_var.get()))),
         )
         settings.validate()
         parse_shortcut(settings.shortcut)
+        parse_shortcut(settings.pinch_shortcut)
         return settings
 
     def _apply_settings_live(self) -> None:
@@ -423,6 +446,7 @@ class GesturesApp:
         self.distance_var.set("—")
         self.fps_var.set("0")
         self.cooldown_status_var.set("Released")
+        self.pinch_var.set("Open")
 
     def calibrate(self) -> None:
         if not self.worker.is_running():
@@ -516,6 +540,15 @@ class GesturesApp:
             if snapshot.cooldown_remaining_ms > 0
             else ("Move finger away" if snapshot.awaiting_release else "Released")
         )
+        self.pinch_var.set(
+            f"{snapshot.pinch_cooldown_remaining_ms} ms"
+            if snapshot.pinch_cooldown_remaining_ms > 0
+            else (
+                "Closed"
+                if snapshot.pinch_detected
+                else ("Release" if snapshot.pinch_awaiting_release else "Open")
+            )
+        )
         self._update_debug(result)
 
         if result.preview_frame is not None and self.preview_var.get():
@@ -531,6 +564,11 @@ class GesturesApp:
             f"{snapshot.relative_distance:.4f}" if snapshot.relative_distance is not None else "--"
         )
         cooldown = f"{snapshot.cooldown_remaining_ms} ms"
+        pinch_distance = (
+            f"{snapshot.pinch_distance:.3f}"
+            if snapshot.pinch_distance is not None
+            else "--"
+        )
         text = "\n".join(
             (
                 f"FPS                 {result.fps:.1f}",
@@ -542,6 +580,10 @@ class GesturesApp:
                 f"State               {snapshot.state.value}",
                 f"Cooldown            {cooldown}",
                 f"Awaiting release    {'yes' if snapshot.awaiting_release else 'no'}",
+                f"Pinch distance      {pinch_distance}",
+                f"Pinch cooldown      {snapshot.pinch_cooldown_remaining_ms} ms",
+                f"Pinch detected      {'yes' if snapshot.pinch_detected else 'no'}",
+                f"Pinch release       {'yes' if snapshot.pinch_awaiting_release else 'no'}",
             )
         )
         self.debug_box.configure(state=tk.NORMAL)

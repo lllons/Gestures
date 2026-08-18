@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 
+THUMB_TIP_INDEX = 4
 INDEX_FINGER_TIP_INDEX = 8
+WRIST_INDEX = 0
+MIDDLE_FINGER_MCP_INDEX = 9
 
 
 @dataclass(frozen=True)

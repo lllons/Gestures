@@ -18,7 +18,12 @@ import cv2
 from .calibration import CalibrationSession, CalibrationUpdate
 from .camera import CameraCapture
 from .face_tracker import FaceDetection, FaceTracker
-from .gesture_detector import DetectionState, GestureDetector, GestureSnapshot
+from .gesture_detector import (
+    DetectionState,
+    GestureDetector,
+    GestureSnapshot,
+    normalized_pinch_distance,
+)
 from .hand_tracker import HandDetection, HandTracker
 from .keyboard_controller import KeyboardController
 from .model_paths import get_model_paths, model_install_message
@@ -193,9 +198,22 @@ class CameraWorker:
                 if snapshot.triggered and keyboard is not None:
                     try:
                         keyboard.press_shortcut(settings.shortcut)
-                        self._notify("info", f"Sent shortcut: {settings.shortcut}")
+                        self._notify("info", f"Sent nose shortcut: {settings.shortcut}")
                     except Exception as exc:
                         self._notify("error", f"Could not send {settings.shortcut!r}: {exc}")
+
+                if snapshot.pinch_triggered and keyboard is not None:
+                    try:
+                        keyboard.press_shortcut(settings.pinch_shortcut)
+                        self._notify(
+                            "info",
+                            f"Sent pinch shortcut: {settings.pinch_shortcut}",
+                        )
+                    except Exception as exc:
+                        self._notify(
+                            "error",
+                            f"Could not send {settings.pinch_shortcut!r}: {exc}",
+                        )
 
                 calibration_update = None
                 if calibration is not None:
@@ -387,6 +405,23 @@ def _draw_overlay(
                     (255, 170, 40),
                     2,
                 )
+        if len(hand.landmarks) > 8:
+            thumb = hand.landmarks[4]
+            index = hand.landmarks[8]
+            pinch_distance = normalized_pinch_distance(hand)
+            pinch_color = (
+                (0, 255, 0)
+                if pinch_distance is not None
+                and pinch_distance <= GestureDetector.PINCH_THRESHOLD
+                else (255, 170, 40)
+            )
+            cv2.line(
+                frame,
+                (_px(thumb.x, width), _px(thumb.y, height)),
+                (_px(index.x, width), _px(index.y, height)),
+                pinch_color,
+                3,
+            )
         for point in hand.landmarks:
             cv2.circle(
                 frame,
@@ -418,6 +453,18 @@ def _draw_overlay(
         cv2.circle(frame, fingertip, 8, (0, 220, 255), 2)
         if snapshot.nose is not None:
             cv2.line(frame, fingertip, nose_point, (0, 220, 255), 2)
+
+    if snapshot.pinch_detected:
+        cv2.putText(
+            frame,
+            "PINCH ACTIVE",
+            (18, 62),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
 
     state_color = {
         DetectionState.READY: (100, 220, 120),
@@ -464,6 +511,7 @@ def _draw_overlay(
             f"Face: {'yes' if snapshot.face_detected else 'no'}",
             f"Distance: {distance}",
             f"Zone: {zone_text}",
+            f"Pinch: {'yes' if snapshot.pinch_detected else 'no'}",
         )
         for line_number, text in enumerate(debug_lines, start=1):
             cv2.putText(

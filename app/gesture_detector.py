@@ -1,4 +1,4 @@
-"""Nose-touch gesture state machine.
+"""Nose-touch and thumb-index pinch gesture state machines.
 
 The detector consumes only normalized MediaPipe landmarks.  Distance is divided
 by the detected face width, so a user can move toward or away from the camera
@@ -13,7 +13,14 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from .face_tracker import FaceDetection
-from .hand_tracker import INDEX_FINGER_TIP_INDEX, HandDetection, Landmark
+from .hand_tracker import (
+    INDEX_FINGER_TIP_INDEX,
+    MIDDLE_FINGER_MCP_INDEX,
+    THUMB_TIP_INDEX,
+    WRIST_INDEX,
+    HandDetection,
+    Landmark,
+)
 from .settings import AppSettings
 
 
@@ -39,6 +46,11 @@ class GestureSnapshot:
     cooldown_remaining_ms: int
     awaiting_release: bool
     message: str
+    pinch_detected: bool = False
+    pinch_distance: float | None = None
+    pinch_triggered: bool = False
+    pinch_cooldown_remaining_ms: int = 0
+    pinch_awaiting_release: bool = False
 
 
 class LandmarkSmoother:
@@ -66,11 +78,13 @@ class LandmarkSmoother:
 
 
 class GestureDetector:
-    """Stateful one-shot detector for INDEX FINGER TIP -> NOSE."""
+    """Stateful one-shot detector for nose touch and thumb-index pinch."""
 
     RELEASE_MARGIN = 1.35
     APPROACH_MARGIN = 2.5
     RELEASE_CONFIRM_SECONDS = 0.12
+    PINCH_THRESHOLD = 0.35
+    PINCH_RELEASE_THRESHOLD = 0.55
 
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -79,6 +93,14 @@ class GestureDetector:
         self._cooldown_until = 0.0
         self._awaiting_release = False
         self._release_started_at: float | None = None
+        self._pinch_cooldown_until = 0.0
+        self._pinch_awaiting_release = False
+        self._pinch_release_started_at: float | None = None
+        self._frame_pinch_distance: float | None = None
+        self._frame_pinch_detected = False
+        self._frame_pinch_triggered = False
+        self._frame_pinch_cooldown_remaining_ms = 0
+        self._frame_pinch_awaiting_release = False
 
     def update_settings(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -90,6 +112,9 @@ class GestureDetector:
         self._cooldown_until = 0.0
         self._awaiting_release = False
         self._release_started_at = None
+        self._pinch_cooldown_until = 0.0
+        self._pinch_awaiting_release = False
+        self._pinch_release_started_at = None
 
     def process(
         self,
@@ -108,9 +133,20 @@ class GestureDetector:
         index_tip = self._smoother.add(raw_index_tip) if raw_index_tip else None
         nose = face.nose if face else None
         relative_distance = _relative_distance(index_tip, nose, face.face_width if face else None)
+        pinch_distance = _closest_pinch_distance(hands)
+        pinch_detected = (
+            pinch_distance is not None and pinch_distance <= self.PINCH_THRESHOLD
+        )
+        self._frame_pinch_distance = pinch_distance
+        self._frame_pinch_detected = pinch_detected
+        self._frame_pinch_triggered = False
+        self._frame_pinch_cooldown_remaining_ms = 0
+        self._frame_pinch_awaiting_release = self._pinch_awaiting_release
 
         if force_disabled or not self._settings.detection_enabled:
             self.reset()
+            self._frame_pinch_detected = False
+            self._frame_pinch_awaiting_release = False
             return self._snapshot(
                 state=DetectionState.READY,
                 hands=hands,
@@ -119,6 +155,12 @@ class GestureDetector:
                 relative_distance=relative_distance,
                 message="Detection disabled" if not force_disabled else "Calibration in progress",
             )
+
+        (
+            self._frame_pinch_triggered,
+            self._frame_pinch_cooldown_remaining_ms,
+            self._frame_pinch_awaiting_release,
+        ) = self._update_pinch(pinch_distance, current_time)
 
         if self._awaiting_release:
             released = relative_distance is None or relative_distance >= self._settings.touch_threshold * self.RELEASE_MARGIN
@@ -252,13 +294,87 @@ class GestureDetector:
                 self._awaiting_release if awaiting_release is None else awaiting_release
             ),
             message=message,
+            pinch_detected=self._frame_pinch_detected,
+            pinch_distance=self._frame_pinch_distance,
+            pinch_triggered=self._frame_pinch_triggered,
+            pinch_cooldown_remaining_ms=self._frame_pinch_cooldown_remaining_ms,
+            pinch_awaiting_release=self._frame_pinch_awaiting_release,
         )
+
+    def _update_pinch(
+        self,
+        pinch_distance: float | None,
+        current_time: float,
+    ) -> tuple[bool, int, bool]:
+        """Return trigger/cooldown/release state for the thumb-index pinch."""
+
+        pinch_active = (
+            pinch_distance is not None and pinch_distance <= self.PINCH_THRESHOLD
+        )
+        if self._pinch_awaiting_release:
+            released = (
+                pinch_distance is None
+                or pinch_distance >= self.PINCH_RELEASE_THRESHOLD
+            )
+            if released:
+                if self._pinch_release_started_at is None:
+                    self._pinch_release_started_at = current_time
+                elif (
+                    current_time - self._pinch_release_started_at
+                    >= self.RELEASE_CONFIRM_SECONDS
+                ):
+                    self._pinch_awaiting_release = False
+                    self._pinch_release_started_at = None
+            else:
+                self._pinch_release_started_at = None
+
+        cooldown_remaining = max(0.0, self._pinch_cooldown_until - current_time)
+        if self._pinch_awaiting_release or cooldown_remaining > 0:
+            return (
+                False,
+                round(cooldown_remaining * 1000),
+                self._pinch_awaiting_release,
+            )
+
+        if pinch_active:
+            self._pinch_cooldown_until = (
+                current_time + self._settings.cooldown_ms / 1000.0
+            )
+            self._pinch_awaiting_release = True
+            self._pinch_release_started_at = None
+            return True, self._settings.cooldown_ms, True
+
+        return False, 0, False
 
 
 def _index_tip(hand: HandDetection | None) -> Landmark | None:
     if hand is None or len(hand.landmarks) <= INDEX_FINGER_TIP_INDEX:
         return None
     return hand.landmarks[INDEX_FINGER_TIP_INDEX]
+
+
+def normalized_pinch_distance(hand: HandDetection | None) -> float | None:
+    """Return thumb-index distance normalized by the hand's palm length."""
+
+    if hand is None or len(hand.landmarks) <= MIDDLE_FINGER_MCP_INDEX:
+        return None
+    thumb = hand.landmarks[THUMB_TIP_INDEX]
+    index = hand.landmarks[INDEX_FINGER_TIP_INDEX]
+    wrist = hand.landmarks[WRIST_INDEX]
+    middle_mcp = hand.landmarks[MIDDLE_FINGER_MCP_INDEX]
+    palm_length = _distance(wrist, middle_mcp)
+    if palm_length <= 0:
+        return None
+    return _distance(thumb, index) / palm_length
+
+
+def _closest_pinch_distance(hands: list[HandDetection]) -> float | None:
+    distances = [
+        distance
+        for hand in hands
+        if (distance := normalized_pinch_distance(hand)) is not None
+    ]
+    return min(distances) if distances else None
 
 
 def _distance(first: Landmark | None, second: Landmark | None) -> float:

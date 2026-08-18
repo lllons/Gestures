@@ -10,6 +10,7 @@ from typing import Any
 
 
 DEFAULT_SHORTCUT = "Alt + Tab"
+DEFAULT_PINCH_SHORTCUT = DEFAULT_SHORTCUT
 
 
 class SettingsError(ValueError):
@@ -29,8 +30,9 @@ class AppSettings:
     detection_enabled: bool = True
     touch_threshold: float = 0.10
     touch_duration_ms: int = 0
-    cooldown_ms: int = 500
+    cooldown_ms: int = 0
     shortcut: str = DEFAULT_SHORTCUT
+    pinch_shortcut: str = DEFAULT_PINCH_SHORTCUT
     preview_visible: bool = True
     debug_mode: bool = True
     start_with_windows: bool = False
@@ -46,10 +48,12 @@ class AppSettings:
             raise SettingsError("Touch threshold must be between 0.01 and 0.50.")
         if not 0 <= self.touch_duration_ms <= 5000:
             raise SettingsError("Touch duration must be between 0 and 5000 ms.")
-        if not 50 <= self.cooldown_ms <= 10000:
-            raise SettingsError("Cooldown must be between 50 and 10000 ms.")
+        if not 0 <= self.cooldown_ms <= 10000:
+            raise SettingsError("Cooldown must be between 0 and 10000 ms.")
         if not self.shortcut.strip():
             raise SettingsError("Keyboard shortcut cannot be empty.")
+        if not self.pinch_shortcut.strip():
+            raise SettingsError("Pinch shortcut cannot be empty.")
         if not 1 <= self.smoothing_frames <= 15:
             raise SettingsError("Smoothing frames must be between 1 and 15.")
         if self.calibrated_face_width is not None and self.calibrated_face_width <= 0:
@@ -73,6 +77,7 @@ class AppSettings:
             touch_duration_ms=int(data.get("touch_duration_ms", cls.touch_duration_ms)),
             cooldown_ms=int(data.get("cooldown_ms", cls.cooldown_ms)),
             shortcut=str(data.get("shortcut", cls.shortcut)),
+            pinch_shortcut=str(data.get("pinch_shortcut", cls.pinch_shortcut)),
             preview_visible=_as_bool(data.get("preview_visible", cls.preview_visible)),
             debug_mode=_as_bool(data.get("debug_mode", cls.debug_mode)),
             start_with_windows=_as_bool(data.get("start_with_windows", cls.start_with_windows)),

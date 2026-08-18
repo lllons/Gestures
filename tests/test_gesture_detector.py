@@ -13,6 +13,8 @@ class GestureDetectorActivationTests(unittest.TestCase):
         settings = AppSettings()
         self.assertAlmostEqual(settings.touch_threshold, 0.10)
         self.assertEqual(settings.touch_duration_ms, 0)
+        self.assertEqual(settings.cooldown_ms, 0)
+        self.assertEqual(settings.pinch_shortcut, "Alt + Tab")
 
         detector = GestureDetector(settings)
         snapshot = detector.process(
@@ -35,6 +37,39 @@ class GestureDetectorActivationTests(unittest.TestCase):
 
         self.assertFalse(snapshot.triggered)
         self.assertEqual(snapshot.state, DetectionState.APPROACHING)
+
+    def test_thumb_index_pinch_triggers_once_until_release(self) -> None:
+        detector = GestureDetector(AppSettings())
+
+        first = detector.process([self._pinch_hand()], None, now=10.0)
+        repeated = detector.process([self._pinch_hand()], None, now=10.01)
+        detector.process([self._open_hand()], None, now=10.20)
+        released = detector.process([self._open_hand()], None, now=10.33)
+        second = detector.process([self._pinch_hand()], None, now=10.34)
+
+        self.assertTrue(first.pinch_detected)
+        self.assertTrue(first.pinch_triggered)
+        self.assertEqual(first.pinch_cooldown_remaining_ms, 0)
+        self.assertFalse(repeated.pinch_triggered)
+        self.assertFalse(released.pinch_awaiting_release)
+        self.assertTrue(second.pinch_triggered)
+
+    @staticmethod
+    def _pinch_hand() -> HandDetection:
+        return GestureDetectorActivationTests._hand_with_thumb_index(0.2, 0.2)
+
+    @staticmethod
+    def _open_hand() -> HandDetection:
+        return GestureDetectorActivationTests._hand_with_thumb_index(0.2, 0.9)
+
+    @staticmethod
+    def _hand_with_thumb_index(thumb_x: float, index_x: float) -> HandDetection:
+        landmarks = [Landmark(0.0, 0.0) for _ in range(21)]
+        landmarks[0] = Landmark(0.0, 0.0)
+        landmarks[4] = Landmark(thumb_x, 0.0)
+        landmarks[8] = Landmark(index_x, 0.0)
+        landmarks[9] = Landmark(0.0, 1.0)
+        return HandDetection(landmarks=tuple(landmarks))
 
     @staticmethod
     def _hand_at(x: float) -> HandDetection:

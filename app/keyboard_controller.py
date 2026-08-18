@@ -53,6 +53,39 @@ _SPECIAL_NAMES = {
 }
 
 
+# Read-only GUI choices: common shortcuts plus every key supported by the parser.
+# Keeping this list here makes the dropdown and keyboard validation share one vocabulary.
+SHORTCUT_OPTIONS = (
+    "Alt + Tab",
+    "Ctrl + C",
+    "Ctrl + V",
+    "Ctrl + X",
+    "Ctrl + Z",
+    "Ctrl + A",
+    "Ctrl + S",
+    "Ctrl + Shift + S",
+    "Alt + F4",
+    "Ctrl + Shift + Esc",
+    "Space",
+    "Tab",
+    "Enter",
+    "Escape",
+    "Backspace",
+    "Delete",
+    "Insert",
+    "Home",
+    "End",
+    "Page Up",
+    "Page Down",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+) + tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ") + tuple("0123456789") + tuple(
+    f"F{number}" for number in range(1, 25)
+)
+
+
 def parse_shortcut(shortcut: str) -> ParsedShortcut:
     """Parse strings such as ``Ctrl + Shift + S`` or ``Escape``."""
 
