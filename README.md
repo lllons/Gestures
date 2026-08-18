@@ -39,49 +39,6 @@ Once you run this last command the GUI will launch and all you need to do it pre
 
 The application does not open the webcam until **Start Detection** is pressed.
 
-### Freebuff preview configuration
-
-This repository is configured with these Freebuff preview commands:
-
-```text
-install: python3 -m pip install -r requirements.txt
-preview: python3 -m app.main (port metadata: 8000)
-build:   node -p 1
-```
-
-The preview command is the desktop application's local launcher, not an HTTP
-server. Freebuff's managed hosting build image is Node-only and cannot build or
-run a Windows Python/Tkinter GUI, so the build entry is only a hosting-side
-compatibility check; use the Windows PyInstaller command below for the real
-executable. The webcam and GUI must be started on the Windows laptop itself.
-
-To stop capture and release the camera, press **Stop**. When stopped or when
-**Enable detection** is unchecked, no keyboard shortcut is emitted.
-
-## Using the application
-
-1. Choose a camera. Press the refresh button if a USB camera was connected
-   after the window opened.
-2. Enter a shortcut, for example `Alt + Tab`, `Ctrl + C`,
-   `Ctrl + Shift + S`, `Space`, or `Escape`.
-3. Set the relative touch threshold, activation delay, and cooldown. The default
-   touch zone is 0.10 of face width and the default activation delay is 0 ms,
-   so the shortcut fires on the first qualifying frame. The default cooldown is
-   500 ms.
-4. Press **Start Detection**.
-5. Optionally press **Calibrate**. Keep your face still during the first phase,
-   then touch the nose with the index fingertip and hold. The measured relative
-   distance plus a safety margin is saved in the per-user settings file.
-
-The camera preview is mirrored to feel natural. Hand landmarks, the face mesh,
-the selected index fingertip, the nose point, the connector line, and the
-relative touch zone are drawn on the preview. Debug diagnostics also show:
-
-- FPS
-- hand count and face/hand detection state
-- normalized index fingertip and nose coordinates
-- fingertip-to-nose distance relative to face width
-- state and cooldown/release status
 
 ## How detection works
 
@@ -106,9 +63,6 @@ relative touch zone are drawn on the preview. Debug diagnostics also show:
 - The default activation delay is 0 ms, so the first qualifying frame triggers
   the shortcut. After it is sent, a cooldown and a separate release hysteresis
   require the fingertip to move outside the zone before a new trigger is armed.
-
-This is an inference-only application. It does not train a custom model and
-contains no cloud AI or language-model feature.
 
 ----
 
