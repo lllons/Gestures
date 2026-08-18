@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+build/
+dist/
+*.spec
+models/*.task
+models/*.download
+.idea/
+.vscode/
