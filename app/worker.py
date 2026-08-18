@@ -398,10 +398,21 @@ def _draw_overlay(
 
     if snapshot.nose is not None:
         nose_point = (_px(snapshot.nose.x, width), _px(snapshot.nose.y, height))
-        cv2.circle(frame, nose_point, 7, (40, 80, 255), 2)
         if snapshot.face_scale:
             radius = max(4, int(snapshot.face_scale * width * settings.touch_threshold))
-            cv2.circle(frame, nose_point, radius, (80, 80, 255), 1)
+            cv2.circle(frame, nose_point, radius, (25, 35, 200), -1)
+            cv2.circle(frame, nose_point, radius, (60, 80, 255), 2)
+            cv2.putText(
+                frame,
+                "ZONE",
+                (nose_point[0] - radius + 6, nose_point[1] - radius + 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+        cv2.circle(frame, nose_point, 7, (40, 80, 255), 2)
     if snapshot.index_tip is not None:
         fingertip = (_px(snapshot.index_tip.x, width), _px(snapshot.index_tip.y, height))
         cv2.circle(frame, fingertip, 8, (0, 220, 255), 2)
@@ -443,11 +454,16 @@ def _draw_overlay(
             if snapshot.relative_distance is not None
             else "--"
         )
+        zone_text = "--"
+        if snapshot.nose is not None and snapshot.face_scale:
+            zone_radius = max(4, int(snapshot.face_scale * width * settings.touch_threshold))
+            zone_text = f"{settings.touch_threshold * 100:.0f}% ({zone_radius}px)"
         debug_lines = (
             f"FPS: {fps:.1f}",
             f"Hand: {'yes' if snapshot.hand_detected else 'no'} ({snapshot.hand_count})",
             f"Face: {'yes' if snapshot.face_detected else 'no'}",
             f"Distance: {distance}",
+            f"Zone: {zone_text}",
         )
         for line_number, text in enumerate(debug_lines, start=1):
             cv2.putText(

@@ -7,7 +7,7 @@ import threading
 import tkinter as tk
 from dataclasses import replace
 from tkinter import messagebox, ttk
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 from PIL import Image, ImageTk
@@ -202,12 +202,21 @@ class GesturesApp:
 
         self._scale_control(
             sidebar,
-            "Touch threshold (relative)",
+            "Activation zone size (% of face width)",
             self.threshold_var,
             0.01,
-            0.25,
+            0.50,
             0.005,
+            format_value=lambda value: f"{value * 100:.0f}%",
+            command=self._apply_settings_live,
         )
+        ttk.Label(
+            sidebar,
+            text="The red circle on the preview is the zone: keep it large enough that your fingertip lands inside when you touch your nose. Drag to resize — no restart needed.",
+            style="Muted.TLabel",
+            wraplength=310,
+            justify=tk.LEFT,
+        ).pack(anchor="w", pady=(0, 2))
         self._scale_control(
             sidebar,
             "Activation delay (ms)",
@@ -290,10 +299,23 @@ class GesturesApp:
         minimum: float,
         maximum: float,
         resolution: float,
+        format_value: Callable[[float], str] | None = None,
+        command: Callable[[], None] | None = None,
     ) -> None:
         row = ttk.Frame(parent, style="Panel.TFrame")
         row.pack(fill=tk.X, pady=(7, 0))
-        value_label = ttk.Label(row, textvariable=variable, style="Muted.TLabel", width=7, anchor="e")
+        if format_value is None:
+            value_label: ttk.Label = ttk.Label(
+                row, textvariable=variable, style="Muted.TLabel", width=7, anchor="e"
+            )
+        else:
+            value_label = ttk.Label(row, style="Muted.TLabel", width=7, anchor="e")
+
+            def update_value(*_: Any) -> None:
+                value_label.configure(text=format_value(float(variable.get())))
+
+            variable.trace_add("write", update_value)
+            update_value()
         value_label.pack(side=tk.RIGHT)
         ttk.Label(row, text=label, style="Panel.TLabel").pack(side=tk.LEFT)
         scale = tk.Scale(
@@ -311,6 +333,7 @@ class GesturesApp:
             troughcolor="#294453",
             activebackground=self.ACCENT,
             sliderrelief=tk.FLAT,
+            command=lambda _value: command() if command else None,
         )
         scale.pack(fill=tk.X, pady=(0, 2))
 
@@ -357,6 +380,11 @@ class GesturesApp:
         settings.validate()
         parse_shortcut(settings.shortcut)
         return settings
+
+    def _apply_settings_live(self) -> None:
+        """Apply slider changes immediately so the zone preview updates live."""
+
+        self._apply_settings(show_errors=False)
 
     def _apply_settings(self, show_errors: bool = True) -> bool:
         try:

@@ -64,10 +64,11 @@ To stop capture and release the camera, press **Stop**. When stopped or when
    after the window opened.
 2. Enter a shortcut, for example `Alt + Tab`, `Ctrl + C`,
    `Ctrl + Shift + S`, `Space`, or `Escape`.
-3. Set the relative touch threshold, activation delay, and cooldown. The default
-   touch zone is 0.10 of face width and the default activation delay is 0 ms,
-   so the shortcut fires on the first qualifying frame. The default cooldown is
-   500 ms.
+3. Set the activation zone size, activation delay, and cooldown. The default
+   touch zone is 10% of face width, adjustable up to 50% with the slider; the
+   red circle on the preview resizes live to show the zone. The default
+   activation delay is 0 ms, so the shortcut fires on the first qualifying
+   frame. The default cooldown is 500 ms.
 4. Press **Start Detection**.
 5. Optionally press **Calibrate**. Keep your face still during the first phase,
    then touch the nose with the index fingertip and hold. The measured relative
@@ -75,7 +76,8 @@ To stop capture and release the camera, press **Stop**. When stopped or when
 
 The camera preview is mirrored to feel natural. Hand landmarks, the face mesh,
 the selected index fingertip, the nose point, the connector line, and the
-relative touch zone are drawn on the preview. Debug diagnostics also show:
+activation zone are drawn on the preview; the zone is shown as a red circle
+around the nose whose size matches the zone slider. Debug diagnostics also show:
 
 - FPS
 - hand count and face/hand detection state
@@ -101,8 +103,8 @@ relative touch zone are drawn on the preview. Debug diagnostics also show:
   webcam.
 - A moving average over five frames reduces jitter. The detector reports
   `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`.
-- The default touch threshold is 0.10 of face width, and it can be increased
-  from the settings panel for an even larger activation zone.
+- The activation zone size is 10% of face width by default, and the slider in
+  the settings panel can increase it up to 50% for an even larger zone.
 - The default activation delay is 0 ms, so the first qualifying frame triggers
   the shortcut. After it is sent, a cooldown and a separate release hysteresis
   require the fingertip to move outside the zone before a new trigger is armed.

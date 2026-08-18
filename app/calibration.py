@@ -25,7 +25,7 @@ class CalibrationSession:
     FACE_REFERENCE_SECONDS = 1.8
     TOUCH_HOLD_SECONDS = 0.8
     TIMEOUT_SECONDS = 25.0
-    TOUCH_GATE = 0.25
+    TOUCH_GATE = 0.50
 
     def __init__(self) -> None:
         self.active = False
@@ -121,7 +121,7 @@ class CalibrationSession:
                 self._touch_distances.append(relative_distance)
                 if current_time - self._touch_started_at >= self.TOUCH_HOLD_SECONDS:
                     measured = median(self._touch_distances)
-                    threshold = max(0.025, min(0.25, measured * 1.35))
+                    threshold = max(0.025, min(0.50, measured * 1.35))
                     face_width = self._face_reference
                     samples = len(self._touch_distances)
                     self.cancel()
