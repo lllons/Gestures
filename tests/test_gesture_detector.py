@@ -15,6 +15,7 @@ class GestureDetectorActivationTests(unittest.TestCase):
         self.assertEqual(settings.touch_duration_ms, 0)
         self.assertEqual(settings.cooldown_ms, 0)
         self.assertEqual(settings.pinch_shortcut, "Alt + Tab")
+        self.assertFalse(settings.air_mouse_enabled)
 
         detector = GestureDetector(settings)
         snapshot = detector.process(

@@ -66,6 +66,9 @@ class GesturesApp:
         self.startup_var = tk.BooleanVar(value=self.settings.start_with_windows)
         self.shortcut_var = tk.StringVar(value=self.settings.shortcut)
         self.pinch_shortcut_var = tk.StringVar(value=self.settings.pinch_shortcut)
+        self.air_mouse_var = tk.BooleanVar(value=self.settings.air_mouse_enabled)
+        self.air_mouse_button_var = tk.StringVar()
+        self._set_air_mouse_button_text()
         self.threshold_var = tk.DoubleVar(value=self.settings.touch_threshold)
         self.duration_var = tk.DoubleVar(value=self.settings.touch_duration_ms)
         self.cooldown_var = tk.DoubleVar(value=self.settings.cooldown_ms)
@@ -147,6 +150,19 @@ class GesturesApp:
         ttk.Button(actions, text="Stop", command=self.stop).grid(
             row=0, column=1, sticky="ew", padx=(4, 0)
         )
+        self.air_mouse_button = ttk.Button(
+            preview_section,
+            textvariable=self.air_mouse_button_var,
+            command=self.toggle_air_mouse,
+        )
+        self.air_mouse_button.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(
+            preview_section,
+            text="Air Mouse: move your index finger to control the pointer; pinch thumb + index to click.",
+            style="Subtitle.TLabel",
+            wraplength=760,
+            justify=tk.LEFT,
+        ).grid(row=4, column=0, sticky="w", pady=(5, 0))
 
         self._build_sidebar(outer)
 
@@ -334,6 +350,20 @@ class GesturesApp:
         )
         self.debug_box.pack(fill=tk.BOTH, expand=True)
 
+    def _set_air_mouse_button_text(self) -> None:
+        self.air_mouse_button_var.set(
+            "Air Mouse: ON" if self.air_mouse_var.get() else "Air Mouse: OFF"
+        )
+
+    def toggle_air_mouse(self) -> None:
+        """Toggle pointer control and persist the choice immediately."""
+
+        previous = bool(self.air_mouse_var.get())
+        self.air_mouse_var.set(not previous)
+        if not self._apply_settings():
+            self.air_mouse_var.set(previous)
+            self._set_air_mouse_button_text()
+
     def _shortcut_control(
         self,
         parent: ttk.Frame,
@@ -447,6 +477,7 @@ class GesturesApp:
             start_with_windows=bool(self.startup_var.get()),
             shortcut=self.shortcut_var.get().strip(),
             pinch_shortcut=self.pinch_shortcut_var.get().strip(),
+            air_mouse_enabled=bool(self.air_mouse_var.get()),
             touch_threshold=round(float(self.threshold_var.get()), 3),
             touch_duration_ms=int(round(float(self.duration_var.get()))),
             cooldown_ms=int(round(float(self.cooldown_var.get()))),
@@ -473,6 +504,7 @@ class GesturesApp:
             return False
 
         self.settings = settings
+        self._set_air_mouse_button_text()
         if self.worker.is_running():
             self.worker.update_settings(settings)
         self.detail_var.set("Settings saved locally.")

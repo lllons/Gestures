@@ -27,6 +27,7 @@ from .gesture_detector import (
 from .hand_tracker import HandDetection, HandTracker
 from .keyboard_controller import KeyboardController
 from .model_paths import get_model_paths, model_install_message
+from .mouse_controller import MouseController
 from .settings import AppSettings, SettingsStore
 
 
@@ -100,6 +101,7 @@ class CameraWorker:
         hand_tracker: HandTracker | None = None
         face_tracker: FaceTracker | None = None
         keyboard: KeyboardController | None = None
+        mouse_controller: MouseController | None = None
         calibration: CalibrationSession | None = None
         fps_times: deque[float] = deque()
         last_camera_notice = 0.0
@@ -127,6 +129,14 @@ class CameraWorker:
                 self._notify(
                     "warning",
                     f"Keyboard control is unavailable; detection can preview only: {exc}",
+                )
+
+            try:
+                mouse_controller = MouseController()
+            except Exception as exc:
+                self._notify(
+                    "warning",
+                    f"Air Mouse control is unavailable; gesture shortcuts still work: {exc}",
                 )
 
             settings = self._read_settings()
@@ -195,6 +205,19 @@ class CameraWorker:
                     force_disabled=is_calibrating,
                 )
 
+                if (
+                    settings.air_mouse_enabled
+                    and settings.detection_enabled
+                    and not is_calibrating
+                    and mouse_controller is not None
+                    and snapshot.index_tip is not None
+                ):
+                    try:
+                        mouse_controller.move_to(snapshot.index_tip)
+                    except Exception as exc:
+                        self._notify("warning", f"Air Mouse movement stopped: {exc}")
+                        mouse_controller = None
+
                 if snapshot.triggered and keyboard is not None:
                     try:
                         keyboard.press_shortcut(settings.shortcut)
@@ -202,18 +225,25 @@ class CameraWorker:
                     except Exception as exc:
                         self._notify("error", f"Could not send {settings.shortcut!r}: {exc}")
 
-                if snapshot.pinch_triggered and keyboard is not None:
-                    try:
-                        keyboard.press_shortcut(settings.pinch_shortcut)
-                        self._notify(
-                            "info",
-                            f"Sent pinch shortcut: {settings.pinch_shortcut}",
-                        )
-                    except Exception as exc:
-                        self._notify(
-                            "error",
-                            f"Could not send {settings.pinch_shortcut!r}: {exc}",
-                        )
+                if snapshot.pinch_triggered:
+                    if settings.air_mouse_enabled and mouse_controller is not None:
+                        try:
+                            mouse_controller.click()
+                            self._notify("info", "Air Mouse click")
+                        except Exception as exc:
+                            self._notify("error", f"Could not click with Air Mouse: {exc}")
+                    elif not settings.air_mouse_enabled and keyboard is not None:
+                        try:
+                            keyboard.press_shortcut(settings.pinch_shortcut)
+                            self._notify(
+                                "info",
+                                f"Sent pinch shortcut: {settings.pinch_shortcut}",
+                            )
+                        except Exception as exc:
+                            self._notify(
+                                "error",
+                                f"Could not send {settings.pinch_shortcut!r}: {exc}",
+                            )
 
                 calibration_update = None
                 if calibration is not None:

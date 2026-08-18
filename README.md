@@ -9,7 +9,9 @@ When the fingertip enters the forgiving nose touch zone, Gestures immediately
 presses one configurable keyboard shortcut. A second configurable shortcut is
 sent when the thumb and index finger touch together. Both shortcuts default to
 `Alt + Tab` and can be changed from the GUI dropdowns. Each gesture fires once,
-then requires release before it can fire again.
+then requires release before it can fire again. When **Air Mouse** is enabled,
+the index fingertip controls the OS pointer by camera position and a thumb-index
+pinch performs a left click at the pointer location.
 
 ### QuickStart
 ##### In a folder of your choosing
@@ -65,7 +67,10 @@ The application does not open the webcam until **Start Detection** is pressed.
   reports `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`, while the
   pinch status is shown separately in the live diagnostics.
 - The pinch shortcut fires when the normalized thumb-index distance is at most
-  0.35 and is re-armed after the fingers separate.
+  0.35 and is re-armed after the fingers separate. In Air Mouse mode, the same
+  pinch performs a left click instead of sending the pinch keyboard shortcut.
+- Air Mouse maps normalized index-fingertip coordinates directly to the virtual
+  desktop, clamping the pointer to the available screen bounds.
 - The default cooldown timer is 0 ms for immediate response; release hysteresis
   still prevents a held gesture from sending repeated shortcuts.
 - The activation zone size is 10% of face width by default, and the slider in
@@ -86,8 +91,8 @@ Settings are stored locally as JSON:
 
 On non-Windows development machines the fallback is `~/.gestures/settings.json`.
 The file contains UI values such as the camera index, activation zone, both
-shortcuts, and calibration result. It does not contain camera frames. The
-optional **Start with
+shortcuts, Air Mouse state, and calibration result. It does not contain camera
+frames. The optional **Start with
 Windows** setting creates/removes a per-user `HKCU` Run entry and does not need
 administrator rights.
 
@@ -132,6 +137,10 @@ permission the first time.
 - **Shortcut failure**: use the documented `pynput` names and test a simple
   shortcut such as `Space`. Some elevated applications may reject synthetic
   input unless Gestures is run with an appropriate Windows integrity level.
+- **Air Mouse failure**: on Windows, allow Gestures to control the pointer and
+  keep the index fingertip clearly visible. The pointer uses the mirrored camera
+  coordinates, so moving your finger to the camera's top-right moves the pointer
+  to the screen's top-right.
 - **Slow FPS**: leave the preview off, use a 640×480 webcam mode, close other
   camera consumers, and allow MediaPipe to run on the CPU. The application does
   not require a dedicated GPU.

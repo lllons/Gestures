@@ -33,6 +33,7 @@ class AppSettings:
     cooldown_ms: int = 0
     shortcut: str = DEFAULT_SHORTCUT
     pinch_shortcut: str = DEFAULT_PINCH_SHORTCUT
+    air_mouse_enabled: bool = False
     preview_visible: bool = True
     debug_mode: bool = True
     start_with_windows: bool = False
@@ -78,6 +79,7 @@ class AppSettings:
             cooldown_ms=int(data.get("cooldown_ms", cls.cooldown_ms)),
             shortcut=str(data.get("shortcut", cls.shortcut)),
             pinch_shortcut=str(data.get("pinch_shortcut", cls.pinch_shortcut)),
+            air_mouse_enabled=_as_bool(data.get("air_mouse_enabled", cls.air_mouse_enabled)),
             preview_visible=_as_bool(data.get("preview_visible", cls.preview_visible)),
             debug_mode=_as_bool(data.get("debug_mode", cls.debug_mode)),
             start_with_windows=_as_bool(data.get("start_with_windows", cls.start_with_windows)),
