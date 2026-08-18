@@ -1,72 +1,41 @@
-# Gestures — local nose-touch shortcut controller
+<p align="center">
+  <img src="p/gestures.pn.png" width="500">
+</p>
 
-Gestures is a Windows desktop application that watches the laptop webcam for one
-specific gesture:
 
-> **INDEX FINGER TIP → NOSE**
+## This is a project that takes your hand location and face location and tracks them to see when they overlap.
 
 When the fingertip enters the forgiving nose touch zone, Gestures immediately
 presses one configurable keyboard shortcut by default. It fires once, enters a
 cooldown/release state, and will not fire again until the fingertip has moved away.
 
-All camera capture, MediaPipe inference, landmark smoothing, calibration, and
-keyboard input run on the local computer. Camera frames are not uploaded,
-stored, logged, or sent to a cloud service.
+### QuickStart
+##### In a folder of your choosing
 
-## Requirements
-
-- Windows 10 or Windows 11
-- Python 3.10–3.12 (64-bit recommended; these versions have the broadest MediaPipe wheel support)
-- A working webcam and permission for desktop applications to use it
-- Internet access only during the one-time Python package/model installation
-  (after that, the app is local/offline)
-
-The UI uses Python's built-in Tkinter. Computer vision uses OpenCV and the
-MediaPipe Tasks Hand Landmarker and Face Landmarker. Keyboard events use
-`pynput`.
-
-## Setup on Windows
-
-Open PowerShell in the repository root:
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+```
+gh repo clone lllons/Gestures
+```
+##### In the same folder
+```
+python -m venv venv
+```
+##### Then..
+```
+venv\Scripts\activate
+```
+##### Then...
+```
 python -m pip install -r requirements.txt
+```
+##### Then....
+```
 python scripts\download_models.py
 ```
-
-If PowerShell blocks activation, either run this once as the current user:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+##### Then.....
 ```
-
-or use the interpreter directly:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe scripts\download_models.py
-```
-
-The model helper downloads the official local task bundles to:
-
-```text
-models\hand_landmarker.task
-models\face_landmarker.task
-```
-
-Those files are needed by MediaPipe at runtime. They are deliberately not
-bundled in the repository because of their size. Do not download camera or
-model data from inside the application; the app fails with a clear message if a
-model file is missing.
-
-## Run
-
-```powershell
 python -m app.main
 ```
+Once you run this last command the GUI will launch and all you need to do it press **"START"**
 
 The application does not open the webcam until **Start Detection** is pressed.
 
@@ -141,6 +110,8 @@ relative touch zone are drawn on the preview. Debug diagnostics also show:
 This is an inference-only application. It does not train a custom model and
 contains no cloud AI or language-model feature.
 
+----
+
 ## Settings storage and privacy
 
 Settings are stored locally as JSON:
@@ -200,6 +171,8 @@ permission the first time.
   camera consumers, and allow MediaPipe to run on the CPU. The application does
   not require a dedicated GPU.
 
+----
+
 ## Project layout
 
 ```text
@@ -222,3 +195,5 @@ scripts/
     download_models.py
 requirements.txt
 ```
+
+Licence MIT
