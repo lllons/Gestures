@@ -134,13 +134,75 @@ class GesturesApp:
         )
         self.preview_label.grid(row=1, column=0, sticky="nsew")
 
+        actions = ttk.Frame(preview_section, style="App.TFrame")
+        actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        ttk.Button(
+            actions,
+            text="Start Detection",
+            style="Accent.TButton",
+            command=self.start,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(actions, text="Stop", command=self.stop).grid(
+            row=0, column=1, sticky="ew", padx=(4, 0)
+        )
+
         self._build_sidebar(outer)
 
     def _build_sidebar(self, parent: ttk.Frame) -> None:
-        sidebar = ttk.Frame(parent, style="Panel.TFrame", padding=18)
+        sidebar = ttk.Frame(parent, style="Panel.TFrame")
         sidebar.grid(row=0, column=1, rowspan=2, sticky="nsew")
         sidebar.configure(width=350)
 
+        self.sidebar_canvas = tk.Canvas(
+            sidebar,
+            bg=self.PANEL,
+            highlightthickness=0,
+            bd=0,
+        )
+        scrollbar = ttk.Scrollbar(sidebar, orient="vertical", command=self.sidebar_canvas.yview)
+        self.sidebar_canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.sidebar_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        content = ttk.Frame(self.sidebar_canvas, style="Panel.TFrame", padding=(18, 16, 10, 18))
+        self._sidebar_window = self.sidebar_canvas.create_window((0, 0), window=content, anchor="nw")
+        content.bind(
+            "<Configure>",
+            lambda _event: self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all")),
+        )
+        self.sidebar_canvas.bind(
+            "<Configure>",
+            lambda event: self.sidebar_canvas.itemconfigure(
+                self._sidebar_window, width=event.width
+            ),
+        )
+        self._pointer_x = 0
+        self._pointer_y = 0
+        self.root.bind_all(
+            "<Motion>",
+            lambda event: self._track_pointer(event.x_root, event.y_root),
+        )
+        self.root.bind_all(
+            "<MouseWheel>",
+            lambda event: self._scroll_sidebar_if_hovered(event),
+        )
+        self._build_sidebar_content(content)
+
+    def _track_pointer(self, x_root: int, y_root: int) -> None:
+        self._pointer_x = x_root
+        self._pointer_y = y_root
+
+    def _scroll_sidebar_if_hovered(self, event: Any) -> None:
+        left = self.sidebar_canvas.winfo_rootx()
+        top = self.sidebar_canvas.winfo_rooty()
+        right = left + self.sidebar_canvas.winfo_width()
+        bottom = top + self.sidebar_canvas.winfo_height()
+        if left <= self._pointer_x <= right and top <= self._pointer_y <= bottom:
+            self.sidebar_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _build_sidebar_content(self, sidebar: ttk.Frame) -> None:
         ttk.Label(sidebar, text="LIVE STATUS", style="PanelTitle.TLabel").pack(anchor="w")
         status_row = ttk.Frame(sidebar, style="Panel.TFrame")
         status_row.pack(fill=tk.X, pady=(8, 2))
@@ -245,16 +307,6 @@ class GesturesApp:
             style="Muted.TLabel",
             wraplength=310,
         ).pack(anchor="w", pady=(0, 10))
-
-        actions = ttk.Frame(sidebar, style="Panel.TFrame")
-        actions.pack(fill=tk.X, pady=(5, 8))
-        ttk.Button(
-            actions,
-            text="Start Detection",
-            style="Accent.TButton",
-            command=self.start,
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-        ttk.Button(actions, text="Stop", command=self.stop).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
 
         secondary = ttk.Frame(sidebar, style="Panel.TFrame")
         secondary.pack(fill=tk.X, pady=(0, 10))
