@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="p/gestures.pn.png" width="500">
+</p>
+
 # Gestures — local nose-touch shortcut controller
 
 Gestures is a Windows desktop application that watches the laptop webcam for one
