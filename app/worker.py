@@ -724,6 +724,34 @@ def _draw_navigation_overlay(
             1,
             cv2.LINE_AA,
         )
+        cv2.putText(
+            frame,
+            (
+                f"vel {navigation.midpoint_velocity_x:+.3f},"
+                f" {navigation.midpoint_velocity_y:+.3f} | "
+                f"zoom v {navigation.distance_velocity:+.3f}"
+            ),
+            (18, 158),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            (
+                f"smooth {navigation.smoothing_amount * 100:.0f}% | "
+                f"dead-zone {'ACTIVE' if navigation.dead_zone_active else 'clear'} | "
+                f"outlier {'REJECTED' if navigation.outlier_rejected else 'clear'}"
+            ),
+            (18, 178),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _px(value: float, dimension: int) -> int:

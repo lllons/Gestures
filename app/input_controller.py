@@ -1,7 +1,7 @@
 """Universal OS input output for two-hand 3D navigation.
 
 This module intentionally knows nothing about Blender, Maya, CAD, or any other
-receiver.  It emits the same relative mouse moves, wheel events, buttons, and
+receiver. It emits the same relative mouse moves, wheel events, buttons, and
 modifiers a person would use in the currently focused application.
 """
 
@@ -39,6 +39,11 @@ class InputStatus:
     held_modifiers: tuple[str, ...] = ()
     message: str = "3D navigation is ready"
     error: str = ""
+    precision_mode: bool = False
+    speed_factor: float = 1.0
+    output_x: int = 0
+    output_y: int = 0
+    output_zoom: int = 0
 
 
 class InputBackend(Protocol):
@@ -119,12 +124,16 @@ class NavigationInputController:
         self._global_enabled = True
         self._held_button: str | None = None
         self._held_modifiers: tuple[str, ...] = ()
+        self._speed_modifiers: set[str] = set()
         self._motion_remainder_x = 0.0
         self._motion_remainder_y = 0.0
         self._wheel_remainder = 0.0
         self._state = InputState.IDLE
         self._message = "3D navigation is ready"
         self._error = ""
+        self._last_output_x = 0
+        self._last_output_y = 0
+        self._last_output_zoom = 0
         self._listener: Any | None = None
         self._toggle_key: Any | None = None
         self._emergency_key: Any | None = None
@@ -133,6 +142,9 @@ class NavigationInputController:
     @property
     def status(self) -> InputStatus:
         with self._lock:
+            precision = self._is_modifier_down_locked(
+                self._settings.navigation_precision_modifier
+            )
             return InputStatus(
                 state=self._state,
                 global_enabled=self._global_enabled,
@@ -141,6 +153,11 @@ class NavigationInputController:
                 held_modifiers=self._held_modifiers,
                 message=self._message,
                 error=self._error,
+                precision_mode=precision,
+                speed_factor=self._speed_factor_locked(),
+                output_x=self._last_output_x,
+                output_y=self._last_output_y,
+                output_zoom=self._last_output_zoom,
             )
 
     @property
@@ -154,13 +171,13 @@ class NavigationInputController:
                 self._release_held_locked()
                 self._state = InputState.DISABLED
                 self._message = "3D navigation is disabled"
-            elif self._state is InputState.DISABLED:
+            elif self._state is InputState.DISABLED and self._global_enabled:
                 self._state = InputState.NAVIGATION_READY
                 self._message = "Press F8 or use the activation pose to navigate"
             self._configure_hotkey_keys_locked()
 
     def start_hotkeys(self) -> bool:
-        """Start the global F8/F9 listener without blocking camera inference."""
+        """Start global safety and speed-modifier listeners without blocking inference."""
 
         with self._lock:
             if self._listener is not None:
@@ -171,7 +188,10 @@ class NavigationInputController:
                 self._configure_hotkey_keys_locked()
                 if self._toggle_key is None or self._emergency_key is None:
                     return False
-                listener = keyboard.Listener(on_press=self._on_key_press)
+                listener = keyboard.Listener(
+                    on_press=self._on_key_press,
+                    on_release=self._on_key_release,
+                )
                 listener.daemon = True
                 listener.start()
                 self._listener = listener
@@ -185,6 +205,7 @@ class NavigationInputController:
         with self._lock:
             listener = self._listener
             self._listener = None
+            self._speed_modifiers.clear()
             if listener is not None:
                 try:
                     listener.stop()
@@ -234,6 +255,9 @@ class NavigationInputController:
         """Apply one frame and return the complete simulated-input status."""
 
         with self._lock:
+            self._last_output_x = 0
+            self._last_output_y = 0
+            self._last_output_zoom = 0
             try:
                 if not self._settings.navigation_enabled or not self._global_enabled:
                     self._release_held_locked()
@@ -276,10 +300,26 @@ class NavigationInputController:
                     self._settings.navigation_profiles,
                 )
                 control_mode = snapshot.control_mode
-                pan = control_mode == "PAN" or (
-                    control_mode == "FULL 3D" and snapshot.pan_pose
+                pan = (
+                    (
+                        control_mode == "PAN"
+                        or (
+                            control_mode == "FULL 3D"
+                            and snapshot.pan_pose
+                        )
+                    )
+                    and (abs(snapshot.pan_x) + abs(snapshot.pan_y) > 1e-12)
                 )
-                orbit = control_mode in {"ORBIT", "FULL 3D"} and not pan
+                orbit = (
+                    control_mode in {"ORBIT", "FULL 3D"}
+                    and not pan
+                    and (
+                        abs(snapshot.orbit_x)
+                        + abs(snapshot.orbit_y)
+                        + abs(getattr(snapshot, "roll", 0.0))
+                        > 1e-12
+                    )
+                )
                 allow_zoom = control_mode in {"ZOOM", "FULL 3D"}
                 if control_mode == "ZOOM":
                     orbit = False
@@ -296,7 +336,7 @@ class NavigationInputController:
                 self._transition_held_locked(desired_button, desired_modifiers)
 
                 if orbit:
-                    motion_x = snapshot.orbit_x + snapshot.roll
+                    motion_x = snapshot.orbit_x + getattr(snapshot, "roll", 0.0)
                     motion_y = snapshot.orbit_y
                     self._emit_motion_locked(motion_x, motion_y)
                 elif pan:
@@ -334,10 +374,29 @@ class NavigationInputController:
 
     def _on_key_press(self, key: Any) -> None:
         with self._lock:
+            modifier = _modifier_name_for_key(key)
+            if modifier:
+                self._speed_modifiers.add(modifier)
             if self._toggle_key is not None and _same_key(key, self._toggle_key):
                 self.toggle_global()
             elif self._emergency_key is not None and _same_key(key, self._emergency_key):
                 self.emergency_stop()
+
+    def _on_key_release(self, key: Any) -> None:
+        with self._lock:
+            modifier = _modifier_name_for_key(key)
+            if modifier:
+                self._speed_modifiers.discard(modifier)
+
+    def _is_modifier_down_locked(self, modifier: str) -> bool:
+        return modifier != "none" and modifier in self._speed_modifiers
+
+    def _speed_factor_locked(self) -> float:
+        if self._is_modifier_down_locked(self._settings.navigation_precision_modifier):
+            return self._settings.navigation_precision_scale
+        if self._is_modifier_down_locked(self._settings.navigation_fast_modifier):
+            return self._settings.navigation_fast_scale
+        return 1.0
 
     def _transition_held_locked(
         self,
@@ -355,7 +414,6 @@ class NavigationInputController:
             self._held_modifiers = (*self._held_modifiers, modifier)
             self._backend.press_modifier(modifier)
         if button is not None:
-            # Likewise track the button before the backend call.
             self._held_button = button
             self._backend.press_button(button)
 
@@ -379,30 +437,30 @@ class NavigationInputController:
                 pass
 
     def _emit_motion_locked(self, x: float, y: float) -> None:
-        acceleration = max(0.0, self._settings.navigation_acceleration)
-        max_speed = max(0.001, self._settings.navigation_max_speed)
-        x = _accelerate(x, acceleration, max_speed)
-        y = _accelerate(y, acceleration, max_speed)
-        self._motion_remainder_x += x * self._settings.navigation_mouse_scale
-        self._motion_remainder_y += y * self._settings.navigation_mouse_scale
+        speed_factor = self._speed_factor_locked()
+        self._motion_remainder_x += x * speed_factor * self._settings.navigation_mouse_scale
+        self._motion_remainder_y += y * speed_factor * self._settings.navigation_mouse_scale
         whole_x = int(self._motion_remainder_x)
         whole_y = int(self._motion_remainder_y)
         self._motion_remainder_x -= whole_x
         self._motion_remainder_y -= whole_y
+        self._last_output_x = whole_x
+        self._last_output_y = whole_y
         if whole_x or whole_y:
             self._backend.move_relative(whole_x, whole_y)
 
     def _emit_zoom_locked(self, zoom: float, profile: InputProfile) -> None:
         if not zoom:
             return
-        direction = profile.zoom_in_direction
-        if self._settings.navigation_invert_zoom:
-            direction *= -1
         self._wheel_remainder += (
-            zoom * direction * self._settings.navigation_zoom_wheel_scale
+            zoom
+            * profile.zoom_in_direction
+            * self._speed_factor_locked()
+            * self._settings.navigation_zoom_wheel_scale
         )
         whole = int(self._wheel_remainder)
         self._wheel_remainder -= whole
+        self._last_output_zoom = whole
         if whole:
             if profile.zoom_axis == "horizontal":
                 self._backend.scroll(whole, 0)
@@ -410,13 +468,23 @@ class NavigationInputController:
                 self._backend.scroll(0, whole)
 
 
-def _accelerate(value: float, acceleration: float, max_speed: float) -> float:
-    """Apply gentle speed-dependent gain without changing the sign."""
+def _modifier_name_for_key(key: Any) -> str | None:
+    """Normalize left/right pynput modifier variants for speed controls."""
 
-    if value == 0.0 or acceleration <= 0.0:
-        return value
-    normalized = min(1.0, abs(value) / max_speed)
-    return value * (1.0 + acceleration * normalized)
+    try:
+        from pynput import keyboard
+    except ImportError:  # pragma: no cover - only used with the real listener
+        return None
+    candidates = {
+        "alt": (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r),
+        "shift": (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r),
+        "ctrl": (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r),
+        "cmd": (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r),
+    }
+    for name, values in candidates.items():
+        if any(key == value for value in values if value is not None):
+            return name
+    return None
 
 
 def _same_key(first: Any, second: Any) -> bool:

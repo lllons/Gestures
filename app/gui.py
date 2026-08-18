@@ -119,11 +119,84 @@ class GesturesApp:
         self.navigation_zoom_var = tk.DoubleVar(value=self.settings.navigation_zoom_sensitivity)
         self.navigation_roll_var = tk.DoubleVar(value=self.settings.navigation_roll_sensitivity)
         self.navigation_smoothing_var = tk.DoubleVar(
-            value=self.settings.navigation_smoothing_frames
+            value=self.settings.navigation_smoothing * 100.0
+        )
+        self.navigation_adaptive_var = tk.BooleanVar(
+            value=self.settings.navigation_adaptive_smoothing
+        )
+        self.navigation_orbit_smoothing_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_smoothing * 100.0
+        )
+        self.navigation_pan_smoothing_var = tk.DoubleVar(
+            value=self.settings.navigation_pan_smoothing * 100.0
+        )
+        self.navigation_zoom_smoothing_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_smoothing * 100.0
         )
         self.navigation_dead_zone_var = tk.DoubleVar(value=self.settings.navigation_dead_zone)
+        self.navigation_orbit_dead_zone_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_dead_zone
+        )
+        self.navigation_pan_dead_zone_var = tk.DoubleVar(
+            value=self.settings.navigation_pan_dead_zone
+        )
+        self.navigation_zoom_dead_zone_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_dead_zone
+        )
         self.navigation_max_speed_var = tk.DoubleVar(value=self.settings.navigation_max_speed)
         self.navigation_acceleration_var = tk.DoubleVar(value=self.settings.navigation_acceleration)
+        self.navigation_orbit_acceleration_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_acceleration
+        )
+        self.navigation_pan_acceleration_var = tk.DoubleVar(
+            value=self.settings.navigation_pan_acceleration
+        )
+        self.navigation_zoom_acceleration_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_acceleration
+        )
+        self.navigation_orbit_max_speed_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_max_speed
+        )
+        self.navigation_pan_max_speed_var = tk.DoubleVar(
+            value=self.settings.navigation_pan_max_speed
+        )
+        self.navigation_zoom_max_speed_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_max_speed
+        )
+        self.navigation_motion_start_var = tk.DoubleVar(
+            value=self.settings.navigation_motion_start_threshold
+        )
+        self.navigation_motion_stop_var = tk.DoubleVar(
+            value=self.settings.navigation_motion_stop_threshold
+        )
+        self.navigation_zoom_start_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_start_threshold
+        )
+        self.navigation_zoom_stop_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_stop_threshold
+        )
+        self.navigation_loss_grace_var = tk.DoubleVar(
+            value=self.settings.navigation_hand_loss_grace_frames
+        )
+        self.navigation_outlier_var = tk.DoubleVar(
+            value=self.settings.navigation_outlier_threshold
+        )
+        self.navigation_one_euro_var = tk.BooleanVar(
+            value=self.settings.navigation_one_euro_enabled
+        )
+        self.navigation_min_cutoff_var = tk.DoubleVar(
+            value=self.settings.navigation_one_euro_min_cutoff
+        )
+        self.navigation_beta_var = tk.DoubleVar(value=self.settings.navigation_one_euro_beta)
+        self.navigation_derivative_cutoff_var = tk.DoubleVar(
+            value=self.settings.navigation_one_euro_derivative_cutoff
+        )
+        self.navigation_precision_modifier_var = tk.StringVar(
+            value=self.settings.navigation_precision_modifier
+        )
+        self.navigation_fast_modifier_var = tk.StringVar(
+            value=self.settings.navigation_fast_modifier
+        )
         self.navigation_mouse_scale_var = tk.DoubleVar(value=self.settings.navigation_mouse_scale)
         self.navigation_zoom_wheel_scale_var = tk.DoubleVar(
             value=self.settings.navigation_zoom_wheel_scale
@@ -163,6 +236,12 @@ class GesturesApp:
         self.navigation_confidence_var = tk.StringVar(value="0%")
         self.navigation_mouse_var = tk.StringVar(value="Released")
         self.navigation_modifiers_var = tk.StringVar(value="None")
+        self.navigation_velocity_var = tk.StringVar(value="0.000, 0.000")
+        self.navigation_zoom_velocity_var = tk.StringVar(value="0.000")
+        self.navigation_smoothing_status_var = tk.StringVar(value="45%")
+        self.navigation_deadzone_status_var = tk.StringVar(value="Idle")
+        self.navigation_outlier_status_var = tk.StringVar(value="No")
+        self.navigation_precision_status_var = tk.StringVar(value="Normal 1.00x")
 
         self.status_var = tk.StringVar(value="READY")
         self.detail_var = tk.StringVar(value="")
@@ -438,6 +517,12 @@ class GesturesApp:
         self._metric(nav_metrics, "Confidence", self.navigation_confidence_var, 7)
         self._metric(nav_metrics, "Mouse", self.navigation_mouse_var, 8)
         self._metric(nav_metrics, "Modifiers", self.navigation_modifiers_var, 9)
+        self._metric(nav_metrics, "Velocity", self.navigation_velocity_var, 10)
+        self._metric(nav_metrics, "Zoom velocity", self.navigation_zoom_velocity_var, 11)
+        self._metric(nav_metrics, "Smoothing", self.navigation_smoothing_status_var, 12)
+        self._metric(nav_metrics, "Dead zone", self.navigation_deadzone_status_var, 13)
+        self._metric(nav_metrics, "Outlier", self.navigation_outlier_status_var, 14)
+        self._metric(nav_metrics, "Speed mode", self.navigation_precision_status_var, 15)
 
         profile_row = ttk.Frame(parent, style="Panel.TFrame")
         profile_row.pack(fill=tk.X, pady=3)
@@ -561,12 +646,42 @@ class GesturesApp:
         )
         self._scale_control(
             parent,
-            "Smoothing (frames)",
+            "Smoothing",
             self.navigation_smoothing_var,
+            0,
+            100,
             1,
-            20,
+            format_value=lambda value: f"{value:.0f}%",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Orbit smoothing",
+            self.navigation_orbit_smoothing_var,
+            0,
+            100,
             1,
-            format_value=lambda value: f"{value:.0f}",
+            format_value=lambda value: f"{value:.0f}%",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Pan smoothing",
+            self.navigation_pan_smoothing_var,
+            0,
+            100,
+            1,
+            format_value=lambda value: f"{value:.0f}%",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom smoothing",
+            self.navigation_zoom_smoothing_var,
+            0,
+            100,
+            1,
+            format_value=lambda value: f"{value:.0f}%",
             command=self._apply_settings_live,
         )
         self._scale_control(
@@ -596,6 +711,156 @@ class GesturesApp:
             0,
             3.0,
             0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Orbit dead zone",
+            self.navigation_orbit_dead_zone_var,
+            0,
+            0.03,
+            0.0005,
+            format_value=lambda value: f"{value:.4f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Pan dead zone",
+            self.navigation_pan_dead_zone_var,
+            0,
+            0.03,
+            0.0005,
+            format_value=lambda value: f"{value:.4f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom dead zone",
+            self.navigation_zoom_dead_zone_var,
+            0,
+            0.03,
+            0.0005,
+            format_value=lambda value: f"{value:.4f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Orbit acceleration",
+            self.navigation_orbit_acceleration_var,
+            0,
+            3.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Pan acceleration",
+            self.navigation_pan_acceleration_var,
+            0,
+            3.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom acceleration",
+            self.navigation_zoom_acceleration_var,
+            0,
+            3.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Orbit maximum speed",
+            self.navigation_orbit_max_speed_var,
+            0.1,
+            5.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Pan maximum speed",
+            self.navigation_pan_max_speed_var,
+            0.1,
+            5.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom maximum speed",
+            self.navigation_zoom_max_speed_var,
+            0.1,
+            5.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Motion start threshold",
+            self.navigation_motion_start_var,
+            0,
+            2.0,
+            0.01,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Motion stop threshold",
+            self.navigation_motion_stop_var,
+            0,
+            2.0,
+            0.01,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom start threshold",
+            self.navigation_zoom_start_var,
+            0,
+            2.0,
+            0.01,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom stop threshold",
+            self.navigation_zoom_stop_var,
+            0,
+            2.0,
+            0.01,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Hand-loss grace (frames)",
+            self.navigation_loss_grace_var,
+            0,
+            5,
+            1,
+            format_value=lambda value: f"{value:.0f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Outlier threshold",
+            self.navigation_outlier_var,
+            0.02,
+            0.50,
+            0.01,
             format_value=lambda value: f"{value:.2f}",
             command=self._apply_settings_live,
         )
@@ -662,6 +927,66 @@ class GesturesApp:
             text="Enable roll from hand angle",
             variable=self.navigation_roll_enabled_var,
         ).pack(anchor="w", pady=2)
+        ttk.Checkbutton(
+            nav_toggles,
+            text="Adaptive smoothing (One Euro beta)",
+            variable=self.navigation_adaptive_var,
+        ).pack(anchor="w", pady=2)
+        ttk.Checkbutton(
+            nav_toggles,
+            text="Enable One Euro low-latency filter",
+            variable=self.navigation_one_euro_var,
+        ).pack(anchor="w", pady=2)
+
+        ttk.Label(parent, text="Advanced filter", style="Muted.TLabel").pack(
+            anchor="w", pady=(8, 3)
+        )
+        self._scale_control(
+            parent,
+            "Minimum cutoff",
+            self.navigation_min_cutoff_var,
+            0.05,
+            5.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Beta (fast-motion response)",
+            self.navigation_beta_var,
+            0,
+            2.0,
+            0.01,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Derivative cutoff",
+            self.navigation_derivative_cutoff_var,
+            0.05,
+            5.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+
+        ttk.Label(parent, text="Speed modifiers", style="Muted.TLabel").pack(
+            anchor="w", pady=(8, 3)
+        )
+        self._navigation_combo(
+            parent,
+            "Precision modifier",
+            self.navigation_precision_modifier_var,
+            ("none", "alt", "shift", "ctrl", "cmd"),
+        )
+        self._navigation_combo(
+            parent,
+            "Fast modifier",
+            self.navigation_fast_modifier_var,
+            ("none", "alt", "shift", "ctrl", "cmd"),
+        )
 
         ttk.Label(parent, text="Safety hotkeys", style="Muted.TLabel").pack(
             anchor="w", pady=(8, 3)
@@ -972,10 +1297,76 @@ class GesturesApp:
             navigation_pan_sensitivity=round(float(self.navigation_pan_var.get()), 2),
             navigation_zoom_sensitivity=round(float(self.navigation_zoom_var.get()), 2),
             navigation_roll_sensitivity=round(float(self.navigation_roll_var.get()), 2),
-            navigation_smoothing_frames=int(round(float(self.navigation_smoothing_var.get()))),
+            navigation_smoothing=round(float(self.navigation_smoothing_var.get()) / 100.0, 3),
+            navigation_adaptive_smoothing=bool(self.navigation_adaptive_var.get()),
+            navigation_orbit_smoothing=round(
+                float(self.navigation_orbit_smoothing_var.get()) / 100.0, 3
+            ),
+            navigation_pan_smoothing=round(
+                float(self.navigation_pan_smoothing_var.get()) / 100.0, 3
+            ),
+            navigation_zoom_smoothing=round(
+                float(self.navigation_zoom_smoothing_var.get()) / 100.0, 3
+            ),
+            # Keep the legacy frame field persisted for older settings files;
+            # navigation itself uses the low-latency time-aware filters above.
+            navigation_smoothing_frames=self.settings.navigation_smoothing_frames,
             navigation_dead_zone=round(float(self.navigation_dead_zone_var.get()), 3),
+            navigation_orbit_dead_zone=round(
+                float(self.navigation_orbit_dead_zone_var.get()), 4
+            ),
+            navigation_pan_dead_zone=round(
+                float(self.navigation_pan_dead_zone_var.get()), 4
+            ),
+            navigation_zoom_dead_zone=round(
+                float(self.navigation_zoom_dead_zone_var.get()), 4
+            ),
             navigation_max_speed=round(float(self.navigation_max_speed_var.get()), 2),
             navigation_acceleration=round(float(self.navigation_acceleration_var.get()), 2),
+            navigation_orbit_acceleration=round(
+                float(self.navigation_orbit_acceleration_var.get()), 2
+            ),
+            navigation_pan_acceleration=round(
+                float(self.navigation_pan_acceleration_var.get()), 2
+            ),
+            navigation_zoom_acceleration=round(
+                float(self.navigation_zoom_acceleration_var.get()), 2
+            ),
+            navigation_orbit_max_speed=round(
+                float(self.navigation_orbit_max_speed_var.get()), 2
+            ),
+            navigation_pan_max_speed=round(
+                float(self.navigation_pan_max_speed_var.get()), 2
+            ),
+            navigation_zoom_max_speed=round(
+                float(self.navigation_zoom_max_speed_var.get()), 2
+            ),
+            navigation_motion_start_threshold=round(
+                float(self.navigation_motion_start_var.get()), 2
+            ),
+            navigation_motion_stop_threshold=round(
+                float(self.navigation_motion_stop_var.get()), 2
+            ),
+            navigation_zoom_start_threshold=round(
+                float(self.navigation_zoom_start_var.get()), 2
+            ),
+            navigation_zoom_stop_threshold=round(
+                float(self.navigation_zoom_stop_var.get()), 2
+            ),
+            navigation_hand_loss_grace_frames=int(
+                round(float(self.navigation_loss_grace_var.get()))
+            ),
+            navigation_outlier_threshold=round(float(self.navigation_outlier_var.get()), 2),
+            navigation_one_euro_enabled=bool(self.navigation_one_euro_var.get()),
+            navigation_one_euro_min_cutoff=round(
+                float(self.navigation_min_cutoff_var.get()), 2
+            ),
+            navigation_one_euro_beta=round(float(self.navigation_beta_var.get()), 2),
+            navigation_one_euro_derivative_cutoff=round(
+                float(self.navigation_derivative_cutoff_var.get()), 2
+            ),
+            navigation_precision_modifier=self.navigation_precision_modifier_var.get().casefold(),
+            navigation_fast_modifier=self.navigation_fast_modifier_var.get().casefold(),
             navigation_mouse_scale=round(float(self.navigation_mouse_scale_var.get()), 1),
             navigation_zoom_wheel_scale=round(
                 float(self.navigation_zoom_wheel_scale_var.get()), 2
@@ -1058,6 +1449,14 @@ class GesturesApp:
         self.navigation_angle_var.set("—")
         self.navigation_vector_var.set("0.000, 0.000")
         self.navigation_confidence_var.set("0%")
+        self.navigation_velocity_var.set("0.000, 0.000")
+        self.navigation_zoom_velocity_var.set("0.000")
+        self.navigation_smoothing_status_var.set(
+            f"{self.settings.navigation_smoothing * 100:.0f}%"
+        )
+        self.navigation_deadzone_status_var.set("Idle")
+        self.navigation_outlier_status_var.set("No")
+        self.navigation_precision_status_var.set("Normal 1.00x")
 
     def calibrate(self) -> None:
         if not self.worker.is_running():
@@ -1207,6 +1606,19 @@ class GesturesApp:
             f"{navigation.midpoint_delta_x:+.3f}, {navigation.midpoint_delta_y:+.3f}"
         )
         self.navigation_confidence_var.set(f"{navigation.confidence * 100:.0f}%")
+        self.navigation_velocity_var.set(
+            f"{navigation.midpoint_velocity_x:+.3f}, {navigation.midpoint_velocity_y:+.3f}"
+        )
+        self.navigation_zoom_velocity_var.set(f"{navigation.distance_velocity:+.3f}")
+        self.navigation_smoothing_status_var.set(
+            f"{navigation.smoothing_amount * 100:.0f}%"
+        )
+        self.navigation_deadzone_status_var.set(
+            "ACTIVE" if navigation.dead_zone_active else "clear"
+        )
+        self.navigation_outlier_status_var.set(
+            "REJECTED" if navigation.outlier_rejected else "No"
+        )
         if input_status is not None:
             self.navigation_mouse_var.set(
                 ", ".join(input_status.held_buttons) if input_status.held_buttons else "Released"
@@ -1215,6 +1627,10 @@ class GesturesApp:
                 ", ".join(input_status.held_modifiers)
                 if input_status.held_modifiers
                 else "None"
+            )
+            mode = "Precision" if input_status.precision_mode else "Normal"
+            self.navigation_precision_status_var.set(
+                f"{mode} {input_status.speed_factor:.2f}x"
             )
         if navigation.calibration_completed:
             self.detail_var.set(navigation.message)
@@ -1254,6 +1670,27 @@ class GesturesApp:
             f"Navigation pose     {navigation.pose}"
             if navigation
             else "Navigation pose     --",
+            f"Raw left hand       {_point_text(navigation.raw_left_hand)}"
+            if navigation
+            else "Raw left hand       --",
+            f"Filtered left hand  {_point_text(navigation.left_hand)}"
+            if navigation
+            else "Filtered left hand  --",
+            f"Raw right hand      {_point_text(navigation.raw_right_hand)}"
+            if navigation
+            else "Raw right hand      --",
+            f"Filtered right hand {_point_text(navigation.right_hand)}"
+            if navigation
+            else "Filtered right hand --",
+            f"Raw midpoint        {_point_text(navigation.raw_midpoint)}"
+            if navigation
+            else "Raw midpoint        --",
+            f"Filtered midpoint   {_point_text(navigation.midpoint)}"
+            if navigation
+            else "Filtered midpoint   --",
+            f"Raw distance        {navigation.raw_distance:.4f}"
+            if navigation and navigation.raw_distance is not None
+            else "Raw distance        --",
             f"Navigation distance {navigation.distance:.4f}"
             if navigation and navigation.distance is not None
             else "Navigation distance --",
@@ -1275,6 +1712,27 @@ class GesturesApp:
             f"Zoom / roll         {navigation.zoom:+.4f}, {navigation.roll:+.4f}"
             if navigation
             else "Zoom / roll         --",
+            f"Midpoint velocity   {navigation.midpoint_velocity_x:+.4f}, {navigation.midpoint_velocity_y:+.4f}"
+            if navigation
+            else "Midpoint velocity   --",
+            f"Zoom velocity       {navigation.distance_velocity:+.4f}"
+            if navigation
+            else "Zoom velocity       --",
+            f"Confidence gain     {navigation.confidence_gain:.2f}"
+            if navigation
+            else "Confidence gain     --",
+            f"Smoothing           {navigation.smoothing_amount * 100:.0f}%"
+            if navigation
+            else "Smoothing           --",
+            f"Dead zone           {'ACTIVE' if navigation.dead_zone_active else 'clear'}"
+            if navigation
+            else "Dead zone           --",
+            f"Outlier rejected    {'yes' if navigation.outlier_rejected else 'no'}"
+            if navigation
+            else "Outlier rejected    --",
+            f"Hand-loss frames    {navigation.hand_loss_frames}"
+            if navigation
+            else "Hand-loss frames    --",
             f"Mouse buttons       {', '.join(input_status.held_buttons) if input_status and input_status.held_buttons else 'NONE'}",
             f"Modifiers           {', '.join(input_status.held_modifiers) if input_status and input_status.held_modifiers else 'NONE'}",
         )

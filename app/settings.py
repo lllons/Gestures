@@ -70,6 +70,37 @@ class AppSettings:
     navigation_invert_y: bool = False
     navigation_invert_zoom: bool = False
     navigation_roll_enabled: bool = False
+
+    # Low-latency navigation signal processing. Values are normalized hand
+    # coordinates or normalized units/second, not screen pixels.
+    navigation_smoothing: float = 0.45
+    navigation_adaptive_smoothing: bool = True
+    navigation_orbit_smoothing: float = 0.45
+    navigation_pan_smoothing: float = 0.45
+    navigation_zoom_smoothing: float = 0.55
+    navigation_orbit_dead_zone: float = 0.004
+    navigation_pan_dead_zone: float = 0.004
+    navigation_zoom_dead_zone: float = 0.003
+    navigation_orbit_acceleration: float = 0.55
+    navigation_pan_acceleration: float = 0.45
+    navigation_zoom_acceleration: float = 0.65
+    navigation_orbit_max_speed: float = 1.35
+    navigation_pan_max_speed: float = 1.0
+    navigation_zoom_max_speed: float = 0.9
+    navigation_motion_start_threshold: float = 0.16
+    navigation_motion_stop_threshold: float = 0.08
+    navigation_zoom_start_threshold: float = 0.12
+    navigation_zoom_stop_threshold: float = 0.06
+    navigation_hand_loss_grace_frames: int = 2
+    navigation_outlier_threshold: float = 0.20
+    navigation_one_euro_enabled: bool = True
+    navigation_one_euro_min_cutoff: float = 1.0
+    navigation_one_euro_beta: float = 0.08
+    navigation_one_euro_derivative_cutoff: float = 1.0
+    navigation_precision_modifier: str = "alt"
+    navigation_fast_modifier: str = "ctrl"
+    navigation_precision_scale: float = 0.35
+    navigation_fast_scale: float = 1.75
     navigation_global_hotkey: str = "F8"
     navigation_emergency_hotkey: str = "F9"
 
@@ -87,10 +118,32 @@ class AppSettings:
                 self.navigation_zoom_sensitivity,
                 self.navigation_roll_sensitivity,
                 self.navigation_dead_zone,
+                self.navigation_smoothing,
+                self.navigation_orbit_smoothing,
+                self.navigation_pan_smoothing,
+                self.navigation_zoom_smoothing,
+                self.navigation_orbit_dead_zone,
+                self.navigation_pan_dead_zone,
+                self.navigation_zoom_dead_zone,
+                self.navigation_orbit_acceleration,
+                self.navigation_pan_acceleration,
+                self.navigation_zoom_acceleration,
                 self.navigation_max_speed,
-                self.navigation_acceleration,
+                self.navigation_orbit_max_speed,
+                self.navigation_pan_max_speed,
+                self.navigation_zoom_max_speed,
+                self.navigation_motion_start_threshold,
+                self.navigation_motion_stop_threshold,
+                self.navigation_zoom_start_threshold,
+                self.navigation_zoom_stop_threshold,
+                self.navigation_outlier_threshold,
+                self.navigation_one_euro_min_cutoff,
+                self.navigation_one_euro_beta,
+                self.navigation_one_euro_derivative_cutoff,
                 self.navigation_mouse_scale,
                 self.navigation_zoom_wheel_scale,
+                self.navigation_precision_scale,
+                self.navigation_fast_scale,
             )
         ):
             raise SettingsError("Sensitivity values must be finite numbers.")
@@ -138,10 +191,73 @@ class AppSettings:
             raise SettingsError("Navigation smoothing must be between 1 and 20 frames.")
         if not 0 <= self.navigation_dead_zone <= 0.10:
             raise SettingsError("Navigation dead zone must be between 0 and 0.10.")
-        if not 0.1 <= self.navigation_max_speed <= 5:
-            raise SettingsError("Navigation max speed must be between 0.1 and 5.")
+        if not 0 <= self.navigation_smoothing <= 1:
+            raise SettingsError("Navigation smoothing must be between 0 and 1.")
+        if not all(
+            0 <= value <= 1
+            for value in (
+                self.navigation_orbit_smoothing,
+                self.navigation_pan_smoothing,
+                self.navigation_zoom_smoothing,
+            )
+        ):
+            raise SettingsError("Channel smoothing must be between 0 and 1.")
+        if not 0 <= self.navigation_orbit_dead_zone <= 0.10:
+            raise SettingsError("Orbit dead zone must be between 0 and 0.10.")
+        if not 0 <= self.navigation_pan_dead_zone <= 0.10:
+            raise SettingsError("Pan dead zone must be between 0 and 0.10.")
+        if not 0 <= self.navigation_zoom_dead_zone <= 0.10:
+            raise SettingsError("Zoom dead zone must be between 0 and 0.10.")
         if not 0 <= self.navigation_acceleration <= 3:
             raise SettingsError("Navigation acceleration must be between 0 and 3.")
+        if not all(
+            0 <= value <= 3
+            for value in (
+                self.navigation_orbit_acceleration,
+                self.navigation_pan_acceleration,
+                self.navigation_zoom_acceleration,
+            )
+        ):
+            raise SettingsError("Channel acceleration must be between 0 and 3.")
+        if not 0.1 <= self.navigation_max_speed <= 5:
+            raise SettingsError("Navigation max speed must be between 0.1 and 5.")
+        if not all(
+            0.1 <= value <= 5
+            for value in (
+                self.navigation_orbit_max_speed,
+                self.navigation_pan_max_speed,
+                self.navigation_zoom_max_speed,
+            )
+        ):
+            raise SettingsError("Channel maximum speed must be between 0.1 and 5.")
+        if not 0 <= self.navigation_motion_stop_threshold <= self.navigation_motion_start_threshold <= 5:
+            raise SettingsError("Motion stop threshold must not exceed motion start threshold.")
+        if not 0 <= self.navigation_zoom_stop_threshold <= self.navigation_zoom_start_threshold <= 5:
+            raise SettingsError("Zoom stop threshold must not exceed zoom start threshold.")
+        if not 0 <= self.navigation_hand_loss_grace_frames <= 5:
+            raise SettingsError("Hand-loss grace must be between 0 and 5 frames.")
+        if not 0.02 <= self.navigation_outlier_threshold <= 0.5:
+            raise SettingsError("Outlier threshold must be between 0.02 and 0.50.")
+        if not 0.05 <= self.navigation_one_euro_min_cutoff <= 20:
+            raise SettingsError("One Euro minimum cutoff must be between 0.05 and 20.")
+        if not 0 <= self.navigation_one_euro_beta <= 20:
+            raise SettingsError("One Euro beta must be between 0 and 20.")
+        if not 0.05 <= self.navigation_one_euro_derivative_cutoff <= 20:
+            raise SettingsError("One Euro derivative cutoff must be between 0.05 and 20.")
+        valid_modifiers = {"none", "shift", "ctrl", "alt", "cmd"}
+        if self.navigation_precision_modifier not in valid_modifiers:
+            raise SettingsError("Precision modifier is not supported.")
+        if self.navigation_fast_modifier not in valid_modifiers:
+            raise SettingsError("Fast modifier is not supported.")
+        if (
+            self.navigation_precision_modifier != "none"
+            and self.navigation_precision_modifier == self.navigation_fast_modifier
+        ):
+            raise SettingsError("Precision and fast modifiers must be different.")
+        if not 0.05 <= self.navigation_precision_scale <= 1:
+            raise SettingsError("Precision scale must be between 0.05 and 1.")
+        if not 1 <= self.navigation_fast_scale <= 3:
+            raise SettingsError("Fast scale must be between 1 and 3.")
         if not 10 <= self.navigation_mouse_scale <= 2000:
             raise SettingsError("Mouse sensitivity must be between 10 and 2000.")
         if not 0.1 <= self.navigation_zoom_wheel_scale <= 20:
@@ -258,6 +374,90 @@ class AppSettings:
             ),
             navigation_roll_enabled=_as_bool(
                 data.get("navigation_roll_enabled", cls.navigation_roll_enabled)
+            ),
+            navigation_smoothing=float(
+                data.get("navigation_smoothing", cls.navigation_smoothing)
+            ),
+            navigation_adaptive_smoothing=_as_bool(
+                data.get("navigation_adaptive_smoothing", cls.navigation_adaptive_smoothing)
+            ),
+            navigation_orbit_smoothing=float(
+                data.get("navigation_orbit_smoothing", cls.navigation_orbit_smoothing)
+            ),
+            navigation_pan_smoothing=float(
+                data.get("navigation_pan_smoothing", cls.navigation_pan_smoothing)
+            ),
+            navigation_zoom_smoothing=float(
+                data.get("navigation_zoom_smoothing", cls.navigation_zoom_smoothing)
+            ),
+            navigation_orbit_dead_zone=float(
+                data.get("navigation_orbit_dead_zone", cls.navigation_orbit_dead_zone)
+            ),
+            navigation_pan_dead_zone=float(
+                data.get("navigation_pan_dead_zone", cls.navigation_pan_dead_zone)
+            ),
+            navigation_zoom_dead_zone=float(
+                data.get("navigation_zoom_dead_zone", cls.navigation_zoom_dead_zone)
+            ),
+            navigation_orbit_acceleration=float(
+                data.get("navigation_orbit_acceleration", cls.navigation_orbit_acceleration)
+            ),
+            navigation_pan_acceleration=float(
+                data.get("navigation_pan_acceleration", cls.navigation_pan_acceleration)
+            ),
+            navigation_zoom_acceleration=float(
+                data.get("navigation_zoom_acceleration", cls.navigation_zoom_acceleration)
+            ),
+            navigation_orbit_max_speed=float(
+                data.get("navigation_orbit_max_speed", cls.navigation_orbit_max_speed)
+            ),
+            navigation_pan_max_speed=float(
+                data.get("navigation_pan_max_speed", cls.navigation_pan_max_speed)
+            ),
+            navigation_zoom_max_speed=float(
+                data.get("navigation_zoom_max_speed", cls.navigation_zoom_max_speed)
+            ),
+            navigation_motion_start_threshold=float(
+                data.get("navigation_motion_start_threshold", cls.navigation_motion_start_threshold)
+            ),
+            navigation_motion_stop_threshold=float(
+                data.get("navigation_motion_stop_threshold", cls.navigation_motion_stop_threshold)
+            ),
+            navigation_zoom_start_threshold=float(
+                data.get("navigation_zoom_start_threshold", cls.navigation_zoom_start_threshold)
+            ),
+            navigation_zoom_stop_threshold=float(
+                data.get("navigation_zoom_stop_threshold", cls.navigation_zoom_stop_threshold)
+            ),
+            navigation_hand_loss_grace_frames=int(
+                data.get("navigation_hand_loss_grace_frames", cls.navigation_hand_loss_grace_frames)
+            ),
+            navigation_outlier_threshold=float(
+                data.get("navigation_outlier_threshold", cls.navigation_outlier_threshold)
+            ),
+            navigation_one_euro_enabled=_as_bool(
+                data.get("navigation_one_euro_enabled", cls.navigation_one_euro_enabled)
+            ),
+            navigation_one_euro_min_cutoff=float(
+                data.get("navigation_one_euro_min_cutoff", cls.navigation_one_euro_min_cutoff)
+            ),
+            navigation_one_euro_beta=float(
+                data.get("navigation_one_euro_beta", cls.navigation_one_euro_beta)
+            ),
+            navigation_one_euro_derivative_cutoff=float(
+                data.get("navigation_one_euro_derivative_cutoff", cls.navigation_one_euro_derivative_cutoff)
+            ),
+            navigation_precision_modifier=str(
+                data.get("navigation_precision_modifier", cls.navigation_precision_modifier)
+            ).casefold(),
+            navigation_fast_modifier=str(
+                data.get("navigation_fast_modifier", cls.navigation_fast_modifier)
+            ).casefold(),
+            navigation_precision_scale=float(
+                data.get("navigation_precision_scale", cls.navigation_precision_scale)
+            ),
+            navigation_fast_scale=float(
+                data.get("navigation_fast_scale", cls.navigation_fast_scale)
             ),
             navigation_global_hotkey=str(
                 data.get("navigation_global_hotkey", cls.navigation_global_hotkey)
