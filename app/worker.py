@@ -15,6 +15,7 @@ from typing import Any
 
 import cv2
 
+from .blender_transport import BlenderTransport
 from .calibration import CalibrationSession, CalibrationUpdate
 from .camera import CameraCapture
 from .face_tracker import FaceDetection, FaceTracker
@@ -29,6 +30,7 @@ from .hand_tracker import HandDetection, HandTracker
 from .keyboard_controller import KeyboardController
 from .model_paths import get_model_paths, model_install_message
 from .mouse_controller import MouseController
+from .navigation import NavigationSnapshot, TwoHandNavigation
 from .settings import AppSettings, SettingsStore
 
 
@@ -45,6 +47,9 @@ class FrameResult:
     fps: float
     camera_index: int
     calibration: CalibrationUpdate | None = None
+    navigation: NavigationSnapshot | None = None
+    blender_connected: bool = False
+    blender_message: str = "Blender add-on not detected"
 
 
 class CameraWorker:
@@ -97,12 +102,17 @@ class CameraWorker:
     def begin_calibration(self) -> None:
         self._commands.put(("calibrate", None))
 
+    def begin_navigation_calibration(self) -> None:
+        self._commands.put(("navigation_calibrate", None))
+
     def _run(self) -> None:
         camera: CameraCapture | None = None
         hand_tracker: HandTracker | None = None
         face_tracker: FaceTracker | None = None
         keyboard: KeyboardController | None = None
         mouse_controller: MouseController | None = None
+        blender_transport: BlenderTransport | None = None
+        navigation: TwoHandNavigation | None = None
         calibration: CalibrationSession | None = None
         fps_times: deque[float] = deque()
         last_camera_notice = 0.0
@@ -142,11 +152,19 @@ class CameraWorker:
 
             settings = self._read_settings()
             detector = GestureDetector(settings)
+            navigation = TwoHandNavigation(settings)
+            blender_transport = BlenderTransport(
+                settings.blender_host,
+                settings.blender_port,
+                settings.blender_reply_port,
+            )
 
             while not self._stop_event.is_set():
                 settings, calibration = self._apply_commands(
                     settings,
                     detector,
+                    navigation,
+                    blender_transport,
                     calibration,
                     camera,
                 )
@@ -162,6 +180,10 @@ class CameraWorker:
                         camera = CameraCapture(settings.camera_index)
                         active_camera_index = settings.camera_index
                     if not camera.open():
+                        if navigation is not None:
+                            navigation.reset()
+                        if blender_transport is not None:
+                            blender_transport.send_stop()
                         now = time.monotonic()
                         if now - last_camera_notice > 3.0:
                             self._notify(
@@ -179,6 +201,10 @@ class CameraWorker:
                 if not ok or frame is None:
                     camera.release()
                     detector.reset()
+                    if navigation is not None:
+                        navigation.reset()
+                    if blender_transport is not None:
+                        blender_transport.send_stop()
                     self._notify(
                         "error",
                         f"Camera {settings.camera_index} stopped responding; retrying...",
@@ -204,6 +230,12 @@ class CameraWorker:
                     hands,
                     face,
                     force_disabled=is_calibrating,
+                )
+                navigation_snapshot = navigation.process(hands) if navigation else None
+                blender_status = (
+                    blender_transport.send(navigation_snapshot)
+                    if blender_transport is not None and navigation_snapshot is not None
+                    else None
                 )
 
                 if (
@@ -307,6 +339,7 @@ class CameraWorker:
                         settings,
                         fps,
                         calibration_update,
+                        navigation_snapshot,
                     )
 
                 self._publish(
@@ -316,10 +349,25 @@ class CameraWorker:
                         fps=fps,
                         camera_index=settings.camera_index,
                         calibration=calibration_update,
+                        navigation=navigation_snapshot,
+                        blender_connected=(blender_status.connected if blender_status else False),
+                        blender_message=(
+                            blender_status.message
+                            if blender_status
+                            else "Blender add-on not detected"
+                        ),
                     )
                 )
                 self._stop_event.wait(0.001)
         finally:
+            if blender_transport is not None:
+                try:
+                    blender_transport.send_stop()
+                except Exception:
+                    pass
+                blender_transport.close()
+            if navigation is not None:
+                navigation.reset()
             if camera is not None:
                 camera.release()
             if hand_tracker is not None:
@@ -337,6 +385,8 @@ class CameraWorker:
         self,
         settings: AppSettings,
         detector: GestureDetector,
+        navigation: TwoHandNavigation,
+        blender_transport: BlenderTransport,
         calibration: CalibrationSession | None,
         camera: CameraCapture | None,
     ) -> tuple[AppSettings, CalibrationSession | None]:
@@ -348,9 +398,21 @@ class CameraWorker:
             if command == "settings":
                 settings = value
                 detector.update_settings(settings)
+                navigation.update_settings(settings)
+                blender_transport.configure(
+                    settings.blender_host,
+                    settings.blender_port,
+                    settings.blender_reply_port,
+                )
                 self._replace_settings(settings)
                 if camera is not None and camera.index != settings.camera_index:
                     camera.release()
+            elif command == "navigation_calibrate":
+                navigation.begin_calibration()
+                self._notify(
+                    "info",
+                    "3D calibration started: hold both hands in a comfortable neutral position.",
+                )
             elif command == "calibrate":
                 calibration = CalibrationSession()
                 calibration.begin()
@@ -404,6 +466,7 @@ def _draw_overlay(
     settings: AppSettings,
     fps: float,
     calibration: CalibrationUpdate | None,
+    navigation: NavigationSnapshot | None = None,
 ) -> Any:
     """Draw hand/face landmarks and debug information onto the local preview."""
 
@@ -496,6 +559,9 @@ def _draw_overlay(
                 (255, 210, 80),
                 -1,
             )
+
+    if navigation is not None:
+        _draw_navigation_overlay(frame, navigation, width, height)
 
     if snapshot.nose is not None:
         nose_point = (_px(snapshot.nose.x, width), _px(snapshot.nose.y, height))
@@ -608,6 +674,60 @@ def _draw_overlay(
                 cv2.LINE_AA,
             )
     return frame
+
+
+def _draw_navigation_overlay(
+    frame: Any,
+    navigation: NavigationSnapshot,
+    width: int,
+    height: int,
+) -> None:
+    """Draw the two-hand navigation geometry and current analog vectors."""
+
+    active_color = (80, 255, 150) if navigation.active else (180, 180, 80)
+    if navigation.left_hand is not None and navigation.right_hand is not None:
+        left = (_px(navigation.left_hand.x, width), _px(navigation.left_hand.y, height))
+        right = (_px(navigation.right_hand.x, width), _px(navigation.right_hand.y, height))
+        cv2.line(frame, left, right, active_color, 3)
+        cv2.circle(frame, left, 9, (255, 120, 60), 2)
+        cv2.circle(frame, right, 9, (60, 180, 255), 2)
+    if navigation.midpoint is not None:
+        midpoint = (
+            _px(navigation.midpoint.x, width),
+            _px(navigation.midpoint.y, height),
+        )
+        cv2.circle(frame, midpoint, 6, active_color, -1)
+        vector_end = (
+            _px(navigation.midpoint.x + navigation.midpoint_delta_x * 3.0, width),
+            _px(navigation.midpoint.y + navigation.midpoint_delta_y * 3.0, height),
+        )
+        cv2.arrowedLine(frame, midpoint, vector_end, (255, 255, 255), 2, tipLength=0.25)
+        cv2.putText(
+            frame,
+            f"NAV {navigation.state.value}: {navigation.gesture}",
+            (18, 112),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            active_color,
+            2,
+            cv2.LINE_AA,
+        )
+        distance = f"{navigation.distance:.3f}" if navigation.distance is not None else "--"
+        angle = (
+            f"{navigation.angle * 180.0 / 3.14159265:.1f} deg"
+            if navigation.angle is not None
+            else "--"
+        )
+        cv2.putText(
+            frame,
+            f"2H distance {distance} | angle {angle} | confidence {navigation.confidence:.2f}",
+            (18, 136),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (235, 235, 235),
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _px(value: float, dimension: int) -> int:
