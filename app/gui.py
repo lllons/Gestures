@@ -14,6 +14,14 @@ import cv2
 from PIL import Image, ImageTk
 
 from .camera import CameraInfo, enumerate_cameras
+from .input_profile import (
+    MODIFIER_TEXT_OPTIONS,
+    MOUSE_BUTTON_OPTIONS,
+    ZOOM_DIRECTION_OPTIONS,
+    InputProfile,
+    get_profile,
+    profile_names,
+)
 from .keyboard_controller import SHORTCUT_OPTIONS, ShortcutError, parse_shortcut
 from .settings import AppSettings, SettingsError, SettingsStore
 from .startup import StartupError, set_start_with_windows
@@ -31,7 +39,7 @@ class GesturesApp:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Gestures — Hand & Blender Controller")
+        self.root.title("Gestures — Universal 3D Hand Controller")
         self.root.geometry("1120x760")
         self.root.minsize(960, 680)
         self.root.configure(bg=self.BG)
@@ -75,7 +83,23 @@ class GesturesApp:
         self.cooldown_var = tk.DoubleVar(value=self.settings.cooldown_ms)
 
         self.navigation_enabled_var = tk.BooleanVar(value=self.settings.navigation_enabled)
-        self.navigation_mode_var = tk.StringVar(value=self.settings.navigation_mode)
+        self.navigation_profile_var = tk.StringVar(value=self.settings.navigation_profile)
+        self.navigation_profile_name_var = tk.StringVar(value=self.settings.navigation_profile)
+        profile = get_profile(
+            self.settings.navigation_profile,
+            self.settings.navigation_profiles,
+        )
+        self.navigation_orbit_button_var = tk.StringVar(value=profile.orbit_button)
+        self.navigation_orbit_modifier_var = tk.StringVar(
+            value=" + ".join(profile.orbit_modifiers) if profile.orbit_modifiers else "none"
+        )
+        self.navigation_pan_button_var = tk.StringVar(value=profile.pan_button)
+        self.navigation_pan_modifier_var = tk.StringVar(
+            value=" + ".join(profile.pan_modifiers) if profile.pan_modifiers else "none"
+        )
+        self.navigation_zoom_direction_var = tk.StringVar(
+            value=profile.zoom_direction_label
+        )
         self.navigation_control_mode_var = tk.StringVar(
             value=self.settings.navigation_control_mode
         )
@@ -84,6 +108,9 @@ class GesturesApp:
         )
         self.navigation_deactivation_var = tk.StringVar(
             value=self.settings.navigation_deactivation_gesture
+        )
+        self.navigation_pan_gesture_var = tk.StringVar(
+            value=self.settings.navigation_pan_gesture
         )
         self.navigation_orbit_var = tk.DoubleVar(
             value=self.settings.navigation_orbit_sensitivity
@@ -96,6 +123,11 @@ class GesturesApp:
         )
         self.navigation_dead_zone_var = tk.DoubleVar(value=self.settings.navigation_dead_zone)
         self.navigation_max_speed_var = tk.DoubleVar(value=self.settings.navigation_max_speed)
+        self.navigation_acceleration_var = tk.DoubleVar(value=self.settings.navigation_acceleration)
+        self.navigation_mouse_scale_var = tk.DoubleVar(value=self.settings.navigation_mouse_scale)
+        self.navigation_zoom_wheel_scale_var = tk.DoubleVar(
+            value=self.settings.navigation_zoom_wheel_scale
+        )
         self.navigation_confidence_threshold_var = tk.DoubleVar(
             value=self.settings.navigation_min_confidence
         )
@@ -110,20 +142,27 @@ class GesturesApp:
         self.navigation_roll_enabled_var = tk.BooleanVar(
             value=self.settings.navigation_roll_enabled
         )
-        self.blender_host_var = tk.StringVar(value=self.settings.blender_host)
-        self.blender_port_var = tk.StringVar(value=str(self.settings.blender_port))
-        self.blender_reply_port_var = tk.StringVar(value=str(self.settings.blender_reply_port))
+        self.navigation_global_hotkey_var = tk.StringVar(
+            value=self.settings.navigation_global_hotkey
+        )
+        self.navigation_emergency_hotkey_var = tk.StringVar(
+            value=self.settings.navigation_emergency_hotkey
+        )
 
         self.navigation_button_var = tk.StringVar()
         self._set_navigation_button_text()
-        self.navigation_status_var = tk.StringVar(value="DISCONNECTED")
+        self.navigation_status_var = tk.StringVar(value="DISABLED")
         self.navigation_hands_var = tk.StringVar(value="0")
-        self.navigation_mode_status_var = tk.StringVar(value=self.settings.navigation_mode)
+        self.navigation_mode_status_var = tk.StringVar(
+            value=self.settings.navigation_control_mode
+        )
         self.navigation_gesture_var = tk.StringVar(value="Idle")
         self.navigation_distance_var = tk.StringVar(value="—")
         self.navigation_angle_var = tk.StringVar(value="—")
         self.navigation_vector_var = tk.StringVar(value="0.000, 0.000")
         self.navigation_confidence_var = tk.StringVar(value="0%")
+        self.navigation_mouse_var = tk.StringVar(value="Released")
+        self.navigation_modifiers_var = tk.StringVar(value="None")
 
         self.status_var = tk.StringVar(value="READY")
         self.detail_var = tk.StringVar(value="")
@@ -366,7 +405,7 @@ class GesturesApp:
         self.debug_box.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     def _build_navigation_controls(self, parent: ttk.Frame) -> None:
-        """Build the opt-in Blender navigation panel inside the existing sidebar."""
+        """Build the opt-in universal 3D navigation panel inside the existing sidebar."""
 
         ttk.Separator(parent).pack(fill=tk.X, pady=(8, 15))
         ttk.Label(parent, text="3D NAVIGATION", style="Section.TLabel").pack(
@@ -397,12 +436,25 @@ class GesturesApp:
         self._metric(nav_metrics, "Angle", self.navigation_angle_var, 5)
         self._metric(nav_metrics, "Vector", self.navigation_vector_var, 6)
         self._metric(nav_metrics, "Confidence", self.navigation_confidence_var, 7)
+        self._metric(nav_metrics, "Mouse", self.navigation_mouse_var, 8)
+        self._metric(nav_metrics, "Modifiers", self.navigation_modifiers_var, 9)
 
-        self._navigation_combo(
-            parent,
-            "Target",
-            self.navigation_mode_var,
-            ("Viewport", "Camera"),
+        profile_row = ttk.Frame(parent, style="Panel.TFrame")
+        profile_row.pack(fill=tk.X, pady=3)
+        ttk.Label(profile_row, text="Input profile", style="Panel.TLabel").pack(side=tk.LEFT)
+        self.navigation_profile_combo = ttk.Combobox(
+            profile_row,
+            textvariable=self.navigation_profile_var,
+            values=list(profile_names(self.settings.navigation_profiles)),
+            state="readonly",
+            width=18,
+        )
+        self.navigation_profile_combo.pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(12, 0)
+        )
+        self.navigation_profile_combo.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._select_profile(),
         )
         self._navigation_combo(
             parent,
@@ -421,6 +473,50 @@ class GesturesApp:
             "Deactivation",
             self.navigation_deactivation_var,
             ("Hands removed", "Two closed hands", "Two open hands"),
+        )
+        self._navigation_combo(
+            parent,
+            "Pan pose in Full 3D",
+            self.navigation_pan_gesture_var,
+            ("Two closed hands", "Two open hands", "Disabled"),
+        )
+
+        ttk.Label(parent, text="Profile mapping", style="Muted.TLabel").pack(
+            anchor="w", pady=(8, 3)
+        )
+        self._entry_control(parent, "Profile name", self.navigation_profile_name_var)
+        self._navigation_combo(
+            parent,
+            "Orbit button",
+            self.navigation_orbit_button_var,
+            MOUSE_BUTTON_OPTIONS,
+        )
+        self._navigation_combo(
+            parent,
+            "Orbit modifier",
+            self.navigation_orbit_modifier_var,
+            MODIFIER_TEXT_OPTIONS,
+        )
+        self._navigation_combo(
+            parent,
+            "Pan button",
+            self.navigation_pan_button_var,
+            MOUSE_BUTTON_OPTIONS,
+        )
+        self._navigation_combo(
+            parent,
+            "Pan modifier",
+            self.navigation_pan_modifier_var,
+            MODIFIER_TEXT_OPTIONS,
+        )
+        self._navigation_combo(
+            parent,
+            "Zoom direction",
+            self.navigation_zoom_direction_var,
+            ZOOM_DIRECTION_OPTIONS,
+        )
+        ttk.Button(parent, text="Save Input Profile", command=self._save_input_profile).pack(
+            fill=tk.X, pady=(3, 6)
         )
 
         self._scale_control(
@@ -495,6 +591,36 @@ class GesturesApp:
         )
         self._scale_control(
             parent,
+            "Acceleration",
+            self.navigation_acceleration_var,
+            0,
+            3.0,
+            0.05,
+            format_value=lambda value: f"{value:.2f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Relative mouse scale",
+            self.navigation_mouse_scale_var,
+            10,
+            1000,
+            10,
+            format_value=lambda value: f"{value:.0f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Zoom wheel scale",
+            self.navigation_zoom_wheel_scale_var,
+            0.1,
+            10.0,
+            0.1,
+            format_value=lambda value: f"{value:.1f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
             "Confidence threshold",
             self.navigation_confidence_threshold_var,
             0.1,
@@ -537,15 +663,81 @@ class GesturesApp:
             variable=self.navigation_roll_enabled_var,
         ).pack(anchor="w", pady=2)
 
-        ttk.Label(parent, text="Blender connection", style="Muted.TLabel").pack(
+        ttk.Label(parent, text="Safety hotkeys", style="Muted.TLabel").pack(
             anchor="w", pady=(8, 3)
         )
-        self._entry_control(parent, "Host", self.blender_host_var)
-        self._entry_control(parent, "Command port", self.blender_port_var)
-        self._entry_control(parent, "Reply port", self.blender_reply_port_var)
+        self._entry_control(parent, "Global toggle", self.navigation_global_hotkey_var)
+        self._entry_control(parent, "Emergency stop", self.navigation_emergency_hotkey_var)
+        ttk.Label(
+            parent,
+            text="F8 toggles OS input. F9 releases every simulated button/modifier.",
+            style="Muted.TLabel",
+            wraplength=300,
+        ).pack(anchor="w", pady=(2, 4))
         ttk.Button(parent, text="Apply 3D Settings", command=self._apply_settings).pack(
             fill=tk.X, pady=(7, 4)
         )
+
+    def _select_profile(self) -> None:
+        self._load_profile_controls()
+        self._apply_settings(show_errors=False)
+
+    def _load_profile_controls(self) -> None:
+        """Load the selected profile into the editable mapping controls."""
+
+        profile = get_profile(
+            self.navigation_profile_var.get(),
+            self.settings.navigation_profiles,
+        )
+        self.navigation_profile_var.set(profile.name)
+        self.navigation_profile_name_var.set(profile.name)
+        self.navigation_orbit_button_var.set(profile.orbit_button)
+        self.navigation_orbit_modifier_var.set(
+            " + ".join(profile.orbit_modifiers) if profile.orbit_modifiers else "none"
+        )
+        self.navigation_pan_button_var.set(profile.pan_button)
+        self.navigation_pan_modifier_var.set(
+            " + ".join(profile.pan_modifiers) if profile.pan_modifiers else "none"
+        )
+        self.navigation_zoom_direction_var.set(profile.zoom_direction_label)
+
+    def _save_input_profile(self) -> None:
+        """Validate and persist a named mapping without application detection."""
+
+        name = self.navigation_profile_name_var.get().strip()
+        try:
+            profile = get_profile(
+                self.navigation_profile_var.get(),
+                self.settings.navigation_profiles,
+            )
+            edited = InputProfile.from_dict(
+                name,
+                {
+                    **profile.to_dict(),
+                    "orbit_button": self.navigation_orbit_button_var.get(),
+                    "orbit_modifiers": self.navigation_orbit_modifier_var.get(),
+                    "pan_button": self.navigation_pan_button_var.get(),
+                    "pan_modifiers": self.navigation_pan_modifier_var.get(),
+                    "zoom_in_direction": self.navigation_zoom_direction_var.get(),
+                },
+            )
+            profiles = dict(self.settings.navigation_profiles)
+            profiles[name] = edited.to_dict()
+            settings = replace(
+                self.settings,
+                navigation_profile=name,
+                navigation_profiles=profiles,
+            )
+            settings.validate()
+            self.settings = settings
+            self.store.save(settings)
+            self.navigation_profile_var.set(name)
+            self.navigation_profile_combo.configure(values=list(profile_names(profiles)))
+            self.detail_var.set(f"Input profile {name!r} saved locally.")
+            if self.worker.is_running():
+                self.worker.update_settings(settings)
+        except (SettingsError, ValueError, OSError) as exc:
+            messagebox.showerror("Invalid input profile", str(exc), parent=self.root)
 
     def _navigation_combo(
         self,
@@ -588,6 +780,9 @@ class GesturesApp:
     def toggle_navigation(self) -> None:
         previous = bool(self.navigation_enabled_var.get())
         self.navigation_enabled_var.set(not previous)
+        if self.navigation_enabled_var.get():
+            self.air_mouse_var.set(False)
+            self._set_air_mouse_button_text()
         if not self._apply_settings():
             self.navigation_enabled_var.set(previous)
             self._set_navigation_button_text()
@@ -736,6 +931,22 @@ class GesturesApp:
         return self._camera_options.get(self.camera_var.get(), self.settings.camera_index)
 
     def _collect_settings(self) -> AppSettings:
+        profile_name = self.navigation_profile_var.get().strip()
+        selected_profile = get_profile(profile_name, self.settings.navigation_profiles)
+        edited_profile = InputProfile.from_dict(
+            profile_name,
+            {
+                **selected_profile.to_dict(),
+                "orbit_button": self.navigation_orbit_button_var.get(),
+                "orbit_modifiers": self.navigation_orbit_modifier_var.get(),
+                "pan_button": self.navigation_pan_button_var.get(),
+                "pan_modifiers": self.navigation_pan_modifier_var.get(),
+                "zoom_in_direction": self.navigation_zoom_direction_var.get(),
+            },
+        )
+        profiles = dict(self.settings.navigation_profiles)
+        profiles[profile_name] = edited_profile.to_dict()
+        navigation_enabled = bool(self.navigation_enabled_var.get())
         settings = replace(
             self.settings,
             camera_index=self._selected_camera_index(),
@@ -745,15 +956,18 @@ class GesturesApp:
             start_with_windows=bool(self.startup_var.get()),
             shortcut=self.shortcut_var.get().strip(),
             pinch_shortcut=self.pinch_shortcut_var.get().strip(),
-            air_mouse_enabled=bool(self.air_mouse_var.get()),
+            # Air Mouse and 3D Navigation are mutually exclusive control modes.
+            air_mouse_enabled=bool(self.air_mouse_var.get()) and not navigation_enabled,
             touch_threshold=round(float(self.threshold_var.get()), 3),
             touch_duration_ms=int(round(float(self.duration_var.get()))),
             cooldown_ms=int(round(float(self.cooldown_var.get()))),
-            navigation_enabled=bool(self.navigation_enabled_var.get()),
-            navigation_mode=self.navigation_mode_var.get().strip(),
+            navigation_enabled=navigation_enabled,
+            navigation_profile=profile_name,
+            navigation_profiles=profiles,
             navigation_control_mode=self.navigation_control_mode_var.get().strip(),
             navigation_activation_gesture=self.navigation_activation_var.get().strip(),
             navigation_deactivation_gesture=self.navigation_deactivation_var.get().strip(),
+            navigation_pan_gesture=self.navigation_pan_gesture_var.get().strip(),
             navigation_orbit_sensitivity=round(float(self.navigation_orbit_var.get()), 2),
             navigation_pan_sensitivity=round(float(self.navigation_pan_var.get()), 2),
             navigation_zoom_sensitivity=round(float(self.navigation_zoom_var.get()), 2),
@@ -761,6 +975,11 @@ class GesturesApp:
             navigation_smoothing_frames=int(round(float(self.navigation_smoothing_var.get()))),
             navigation_dead_zone=round(float(self.navigation_dead_zone_var.get()), 3),
             navigation_max_speed=round(float(self.navigation_max_speed_var.get()), 2),
+            navigation_acceleration=round(float(self.navigation_acceleration_var.get()), 2),
+            navigation_mouse_scale=round(float(self.navigation_mouse_scale_var.get()), 1),
+            navigation_zoom_wheel_scale=round(
+                float(self.navigation_zoom_wheel_scale_var.get()), 2
+            ),
             navigation_min_confidence=round(
                 float(self.navigation_confidence_threshold_var.get()), 2
             ),
@@ -771,9 +990,8 @@ class GesturesApp:
             navigation_invert_y=bool(self.navigation_invert_y_var.get()),
             navigation_invert_zoom=bool(self.navigation_invert_zoom_var.get()),
             navigation_roll_enabled=bool(self.navigation_roll_enabled_var.get()),
-            blender_host=self.blender_host_var.get().strip(),
-            blender_port=int(self.blender_port_var.get().strip()),
-            blender_reply_port=int(self.blender_reply_port_var.get().strip()),
+            navigation_global_hotkey=self.navigation_global_hotkey_var.get().strip(),
+            navigation_emergency_hotkey=self.navigation_emergency_hotkey_var.get().strip(),
         )
         settings.validate()
         parse_shortcut(settings.shortcut)
@@ -787,6 +1005,8 @@ class GesturesApp:
 
     def _apply_settings(self, show_errors: bool = True) -> bool:
         try:
+            if self.navigation_enabled_var.get():
+                self.air_mouse_var.set(False)
             settings = self._collect_settings()
             if settings.start_with_windows != self.settings.start_with_windows:
                 set_start_with_windows(settings.start_with_windows)
@@ -799,6 +1019,10 @@ class GesturesApp:
         self.settings = settings
         self._set_air_mouse_button_text()
         self._set_navigation_button_text()
+        if hasattr(self, "navigation_profile_combo"):
+            self.navigation_profile_combo.configure(
+                values=list(profile_names(settings.navigation_profiles))
+            )
         if self.worker.is_running():
             self.worker.update_settings(settings)
         self.detail_var.set("Settings saved locally.")
@@ -817,7 +1041,7 @@ class GesturesApp:
         self.worker.stop()
         self._calibration_active = False
         self.status_var.set("STOPPED")
-        self.detail_var.set("Camera released. No keyboard input is sent while stopped.")
+        self.detail_var.set("Camera released. No simulated 3D input remains held.")
         self._show_preview_placeholder("Camera stopped")
         self.hand_var.set("Not detected")
         self.face_var.set("Not detected")
@@ -826,9 +1050,9 @@ class GesturesApp:
         self.cooldown_status_var.set("Released")
         self.pinch_var.set("Open")
         self.scroll_var.set("Off")
-        self.navigation_status_var.set("DISCONNECTED")
+        self.navigation_status_var.set("DISABLED")
         self.navigation_hands_var.set("0")
-        self.navigation_mode_status_var.set(self.navigation_mode_var.get())
+        self.navigation_mode_status_var.set(self.navigation_control_mode_var.get())
         self.navigation_gesture_var.set("Idle")
         self.navigation_distance_var.set("—")
         self.navigation_angle_var.set("—")
@@ -949,24 +1173,27 @@ class GesturesApp:
 
     def _update_navigation(self, result: FrameResult) -> None:
         navigation = result.navigation
+        input_status = result.input_status
         if navigation is None:
-            self.navigation_status_var.set("DISCONNECTED")
+            self.navigation_status_var.set("DISABLED")
             return
 
         if not navigation.enabled:
             status = "DISABLED"
         elif navigation.calibration_active:
             status = "CALIBRATING"
+        elif input_status is not None and not input_status.global_enabled:
+            status = "DISABLED"
         elif navigation.active:
-            status = "ACTIVE" if result.blender_connected else "ACTIVE / OFFLINE"
+            status = "ACTIVE"
         else:
-            status = "CONNECTED" if result.blender_connected else "DISCONNECTED"
+            status = "READY"
         self.navigation_status_var.set(status)
-        if result.blender_message and result.blender_message != "Blender add-on not detected":
-            self.detail_var.set(result.blender_message)
+        if input_status is not None and input_status.message:
+            self.detail_var.set(input_status.message)
 
         self.navigation_hands_var.set(str(navigation.hand_count))
-        self.navigation_mode_status_var.set(navigation.target_mode)
+        self.navigation_mode_status_var.set(navigation.control_mode)
         self.navigation_gesture_var.set(navigation.gesture)
         self.navigation_distance_var.set(
             f"{navigation.distance:.3f}" if navigation.distance is not None else "—"
@@ -980,6 +1207,15 @@ class GesturesApp:
             f"{navigation.midpoint_delta_x:+.3f}, {navigation.midpoint_delta_y:+.3f}"
         )
         self.navigation_confidence_var.set(f"{navigation.confidence * 100:.0f}%")
+        if input_status is not None:
+            self.navigation_mouse_var.set(
+                ", ".join(input_status.held_buttons) if input_status.held_buttons else "Released"
+            )
+            self.navigation_modifiers_var.set(
+                ", ".join(input_status.held_modifiers)
+                if input_status.held_modifiers
+                else "None"
+            )
         if navigation.calibration_completed:
             self.detail_var.set(navigation.message)
         elif navigation.message and navigation.state.value in {"ACTIVATING", "LOST"}:
@@ -992,7 +1228,6 @@ class GesturesApp:
         distance = (
             f"{snapshot.relative_distance:.4f}" if snapshot.relative_distance is not None else "--"
         )
-        cooldown = f"{snapshot.cooldown_remaining_ms} ms"
         pinch_distance = (
             f"{snapshot.pinch_distance:.3f}"
             if snapshot.pinch_distance is not None
@@ -1005,21 +1240,32 @@ class GesturesApp:
         )
         scroll_delta = f"{snapshot.scroll_delta_x:.4f}, {snapshot.scroll_delta_y:.4f}"
         navigation = result.navigation
+        input_status = result.input_status
         navigation_lines = (
             f"Navigation status   {self.navigation_status_var.get()}",
-            f"Blender             {result.blender_message}",
+            f"Input state         {input_status.state.value if input_status else '--'}",
+            f"Global input        {'ON' if input_status and input_status.global_enabled else 'OFF'}",
             f"Navigation hands    {navigation.hand_count}"
             if navigation
             else "Navigation hands    --",
             f"Navigation gesture  {navigation.gesture}"
             if navigation
             else "Navigation gesture  --",
+            f"Navigation pose     {navigation.pose}"
+            if navigation
+            else "Navigation pose     --",
             f"Navigation distance {navigation.distance:.4f}"
             if navigation and navigation.distance is not None
             else "Navigation distance --",
+            f"Distance delta      {navigation.distance_delta:+.4f}"
+            if navigation
+            else "Distance delta      --",
             f"Navigation angle    {math.degrees(navigation.angle):.2f}"
             if navigation and navigation.angle is not None
-            else "Navigation angle --",
+            else "Navigation angle    --",
+            f"Angle delta         {navigation.angle_delta:+.4f}"
+            if navigation
+            else "Angle delta         --",
             f"Orbit vector        {navigation.orbit_x:+.4f}, {navigation.orbit_y:+.4f}"
             if navigation
             else "Orbit vector        --",
@@ -1029,6 +1275,8 @@ class GesturesApp:
             f"Zoom / roll         {navigation.zoom:+.4f}, {navigation.roll:+.4f}"
             if navigation
             else "Zoom / roll         --",
+            f"Mouse buttons       {', '.join(input_status.held_buttons) if input_status and input_status.held_buttons else 'NONE'}",
+            f"Modifiers           {', '.join(input_status.held_modifiers) if input_status and input_status.held_modifiers else 'NONE'}",
         )
         text = "\n".join(
             (
@@ -1039,7 +1287,7 @@ class GesturesApp:
                 f"Nose                {nose}",
                 f"Relative distance   {distance}",
                 f"State               {snapshot.state.value}",
-                f"Cooldown            {cooldown}",
+                f"Cooldown            {snapshot.cooldown_remaining_ms} ms",
                 f"Awaiting release    {'yes' if snapshot.awaiting_release else 'no'}",
                 f"Pinch distance      {pinch_distance}",
                 f"Pinch cooldown      {snapshot.pinch_cooldown_remaining_ms} ms",

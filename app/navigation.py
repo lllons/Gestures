@@ -1,8 +1,9 @@
-"""Two-hand gesture interpretation for continuous Blender navigation.
+"""Two-hand gesture interpretation for universal 3D navigation.
 
-This module deliberately has no GUI, socket, camera, or Blender dependencies.
-It consumes the existing MediaPipe ``HandDetection`` values and produces a
-small per-frame state packet that another output adapter can use.
+This module deliberately has no GUI, socket, desktop-input, or application
+integration dependencies. It consumes the existing MediaPipe
+``HandDetection`` values and produces a per-frame analog motion snapshot for a
+generic OS input adapter.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ class NavigationSnapshot:
 
     Movement values are deltas for this frame, never accumulated positions.
     That makes a lost-hand packet naturally neutral and prevents tracking drift
-    from slowly moving the Blender view.
+    from slowly moving the focused 3D view.
     """
 
     state: NavigationState
@@ -63,10 +64,12 @@ class NavigationSnapshot:
     pan_y: float
     zoom: float
     roll: float
+    pan_pose: bool = False
+    pose: str = "Orbit pose"
     calibration_active: bool = False
     calibration_completed: bool = False
     calibration_succeeded: bool = False
-    target_mode: str = "Viewport"
+    profile_name: str = "Generic 3D"
     control_mode: str = "FULL 3D"
     message: str = ""
     neutral_midpoint: Landmark | None = None
@@ -82,14 +85,14 @@ class NavigationSnapshot:
         )
 
     def to_payload(self) -> dict[str, Any]:
-        """Return a JSON-compatible packet for the local Blender transport."""
+        """Return a JSON-compatible, application-independent debug packet."""
 
         return {
             "type": "gestures_navigation",
-            "version": 1,
+            "version": 2,
             "state": self.state.value,
             "enabled": self.enabled,
-            "mode": self.target_mode,
+            "profile": self.profile_name,
             "control_mode": self.control_mode,
             "active": self.active,
             "hands": self.hand_count,
@@ -115,6 +118,8 @@ class NavigationSnapshot:
             "pan_y": self.pan_y,
             "zoom": self.zoom,
             "roll": self.roll,
+            "pan_pose": self.pan_pose,
+            "pose": self.pose,
             "confidence": self.confidence,
             "activation_progress": self.activation_progress,
             "calibration": {
@@ -331,6 +336,12 @@ class TwoHandNavigation:
                         confidence=confidence,
                         activation_progress=1.0,
                         gesture="Idle",
+                        pan_pose=_pan_pose(pair, self._settings.navigation_pan_gesture),
+                        pose=(
+                            "Pan pose"
+                            if _pan_pose(pair, self._settings.navigation_pan_gesture)
+                            else "Orbit pose"
+                        ),
                         message="3D navigation active",
                     )
                 return self._snapshot(
@@ -520,6 +531,7 @@ class TwoHandNavigation:
             else 0.0
         )
 
+        pan_pose = _pan_pose(pair, self._settings.navigation_pan_gesture)
         mode = self._settings.navigation_control_mode
         if mode == "ORBIT":
             pan_x = pan_y = zoom = 0.0
@@ -537,6 +549,18 @@ class TwoHandNavigation:
         zoom = _limit(zoom, output_limit)
         roll = _limit(roll, output_limit)
         gesture = _gesture_name(orbit_x, orbit_y, pan_x, pan_y, zoom, roll)
+        if mode == "FULL 3D":
+            has_translation = max(
+                abs(orbit_x), abs(orbit_y), abs(pan_x), abs(pan_y)
+            ) > 0.0
+            labels: list[str] = []
+            if has_translation:
+                labels.append("Pan" if pan_pose else "Orbit")
+            if abs(zoom) > 0.0:
+                labels.append("Zoom")
+            if abs(roll) > 0.0:
+                labels.append("Roll")
+            gesture = " + ".join(labels) if labels else "Idle"
 
         return self._snapshot(
             state=NavigationState.ACTIVE,
@@ -571,6 +595,8 @@ class TwoHandNavigation:
             pan_y=pan_y,
             zoom=zoom,
             roll=roll,
+            pan_pose=pan_pose,
+            pose="Pan pose" if pan_pose else "Orbit pose",
             message=gesture if gesture != "Idle" else "3D navigation active",
         )
 
@@ -599,6 +625,8 @@ class TwoHandNavigation:
         pan_y: float = 0.0,
         zoom: float = 0.0,
         roll: float = 0.0,
+        pan_pose: bool = False,
+        pose: str = "Orbit pose",
         calibration_active: bool = False,
         calibration_completed: bool = False,
         calibration_succeeded: bool = False,
@@ -637,10 +665,12 @@ class TwoHandNavigation:
             pan_y=pan_y,
             zoom=zoom,
             roll=roll,
+            pan_pose=pan_pose,
+            pose=pose,
             calibration_active=calibration_active,
             calibration_completed=calibration_completed,
             calibration_succeeded=calibration_succeeded,
-            target_mode=self._settings.navigation_mode,
+            profile_name=self._settings.navigation_profile,
             control_mode=self._settings.navigation_control_mode,
             message=message,
             neutral_midpoint=self._neutral_midpoint,
@@ -743,6 +773,17 @@ def _activation_pose(
     if gesture == "Two closed hands":
         return all(not hand_is_open(hand) for hand in pair)
     return all(hand_is_open(hand) for hand in pair)
+
+
+def _pan_pose(
+    pair: tuple[HandDetection, HandDetection],
+    gesture: str,
+) -> bool:
+    if gesture == "Two closed hands":
+        return all(not hand_is_open(hand) for hand in pair)
+    if gesture == "Two open hands":
+        return all(hand_is_open(hand) for hand in pair)
+    return False
 
 
 def _deactivation_pose(

@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .input_profile import InputProfile, default_profile_data
 
 
 DEFAULT_SHORTCUT = "Alt + Tab"
@@ -23,8 +25,8 @@ class AppSettings:
     """All user-configurable application values.
 
     ``touch_threshold`` is measured as fingertip-to-nose distance divided by
-    the current face width in normalized image coordinates.  It therefore
-    adapts when the user moves closer to or farther from the webcam.
+    the current face width in normalized image coordinates. It therefore adapts
+    when the user moves closer to or farther from the webcam.
     """
 
     camera_index: int = 0
@@ -41,13 +43,17 @@ class AppSettings:
     smoothing_frames: int = 5
     calibrated_face_width: float | None = None
 
-    # Two-hand Blender navigation. These values are deliberately kept in the
-    # same local settings file so the feature remains usable offline.
+    # Universal two-hand navigation settings. Profiles contain only generic
+    # mouse/modifier mappings; there is no target-application integration.
     navigation_enabled: bool = False
-    navigation_mode: str = "Viewport"
+    navigation_profile: str = "Generic 3D"
+    navigation_profiles: dict[str, dict[str, Any]] = field(
+        default_factory=default_profile_data
+    )
     navigation_control_mode: str = "FULL 3D"
     navigation_activation_gesture: str = "Two open hands"
     navigation_deactivation_gesture: str = "Hands removed"
+    navigation_pan_gesture: str = "Two closed hands"
     navigation_activation_hold_ms: int = 700
     navigation_orbit_sensitivity: float = 4.0
     navigation_pan_sensitivity: float = 1.25
@@ -56,14 +62,16 @@ class AppSettings:
     navigation_smoothing_frames: int = 5
     navigation_dead_zone: float = 0.004
     navigation_max_speed: float = 1.25
+    navigation_acceleration: float = 0.5
+    navigation_mouse_scale: float = 280.0
+    navigation_zoom_wheel_scale: float = 2.0
     navigation_min_confidence: float = 0.50
     navigation_invert_x: bool = False
     navigation_invert_y: bool = False
     navigation_invert_zoom: bool = False
     navigation_roll_enabled: bool = False
-    blender_host: str = "127.0.0.1"
-    blender_port: int = 8765
-    blender_reply_port: int = 8766
+    navigation_global_hotkey: str = "F8"
+    navigation_emergency_hotkey: str = "F9"
 
     def validate(self) -> "AppSettings":
         """Validate values and return this immutable settings object."""
@@ -80,6 +88,9 @@ class AppSettings:
                 self.navigation_roll_sensitivity,
                 self.navigation_dead_zone,
                 self.navigation_max_speed,
+                self.navigation_acceleration,
+                self.navigation_mouse_scale,
+                self.navigation_zoom_wheel_scale,
             )
         ):
             raise SettingsError("Sensitivity values must be finite numbers.")
@@ -97,8 +108,6 @@ class AppSettings:
             raise SettingsError("Smoothing frames must be between 1 and 15.")
         if self.calibrated_face_width is not None and self.calibrated_face_width <= 0:
             raise SettingsError("Calibrated face width must be positive.")
-        if self.navigation_mode not in {"Viewport", "Camera"}:
-            raise SettingsError("Navigation mode must be Viewport or Camera.")
         if self.navigation_control_mode not in {"ORBIT", "PAN", "ZOOM", "FULL 3D"}:
             raise SettingsError("Navigation control mode is not supported.")
         if self.navigation_activation_gesture not in {"Two open hands", "Two closed hands"}:
@@ -109,6 +118,12 @@ class AppSettings:
             "Two open hands",
         }:
             raise SettingsError("Navigation deactivation gesture is not supported.")
+        if self.navigation_pan_gesture not in {
+            "Disabled",
+            "Two closed hands",
+            "Two open hands",
+        }:
+            raise SettingsError("Navigation pan gesture is not supported.")
         if not 250 <= self.navigation_activation_hold_ms <= 3000:
             raise SettingsError("Navigation activation hold must be between 250 and 3000 ms.")
         if not 0.1 <= self.navigation_orbit_sensitivity <= 20:
@@ -125,18 +140,28 @@ class AppSettings:
             raise SettingsError("Navigation dead zone must be between 0 and 0.10.")
         if not 0.1 <= self.navigation_max_speed <= 5:
             raise SettingsError("Navigation max speed must be between 0.1 and 5.")
+        if not 0 <= self.navigation_acceleration <= 3:
+            raise SettingsError("Navigation acceleration must be between 0 and 3.")
+        if not 10 <= self.navigation_mouse_scale <= 2000:
+            raise SettingsError("Mouse sensitivity must be between 10 and 2000.")
+        if not 0.1 <= self.navigation_zoom_wheel_scale <= 20:
+            raise SettingsError("Zoom wheel scale must be between 0.1 and 20.")
         if not math.isfinite(self.navigation_min_confidence) or not 0.1 <= self.navigation_min_confidence <= 1.0:
             raise SettingsError("Navigation confidence threshold must be between 0.1 and 1.0.")
-        if not self.blender_host.strip():
-            raise SettingsError("Blender host cannot be empty.")
-        if self.blender_host.strip().casefold() not in {"127.0.0.1", "localhost"}:
-            raise SettingsError("Blender connection must stay on localhost for offline safety.")
-        if not 1 <= self.blender_port <= 65535:
-            raise SettingsError("Blender port must be between 1 and 65535.")
-        if not 1 <= self.blender_reply_port <= 65535:
-            raise SettingsError("Blender reply port must be between 1 and 65535.")
-        if self.blender_port == self.blender_reply_port:
-            raise SettingsError("Blender command and reply ports must be different.")
+        if not self.navigation_global_hotkey.strip() or not self.navigation_emergency_hotkey.strip():
+            raise SettingsError("Navigation hotkeys cannot be empty.")
+        if self.navigation_global_hotkey.casefold() == self.navigation_emergency_hotkey.casefold():
+            raise SettingsError("Global and emergency navigation hotkeys must be different.")
+
+        if not isinstance(self.navigation_profiles, dict) or not self.navigation_profiles:
+            raise SettingsError("At least one input profile is required.")
+        if self.navigation_profile not in self.navigation_profiles:
+            raise SettingsError(f"Input profile {self.navigation_profile!r} was not found.")
+        for profile_name, profile_data in self.navigation_profiles.items():
+            try:
+                InputProfile.from_dict(str(profile_name), profile_data)
+            except (TypeError, ValueError) as exc:
+                raise SettingsError(f"Invalid input profile {profile_name!r}: {exc}") from exc
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -146,9 +171,15 @@ class AppSettings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
-        """Create settings from a JSON object with strict type conversion."""
+        """Create settings from a JSON object with backward-compatible defaults."""
 
         calibrated_width = data.get("calibrated_face_width")
+        profiles = default_profile_data()
+        stored_profiles = data.get("navigation_profiles")
+        if isinstance(stored_profiles, dict):
+            for profile_name, profile_data in stored_profiles.items():
+                if isinstance(profile_data, dict):
+                    profiles[str(profile_name)] = dict(profile_data)
         return cls(
             camera_index=int(data.get("camera_index", cls.camera_index)),
             detection_enabled=_as_bool(data.get("detection_enabled", cls.detection_enabled)),
@@ -166,7 +197,8 @@ class AppSettings:
                 None if calibrated_width in (None, "") else float(calibrated_width)
             ),
             navigation_enabled=_as_bool(data.get("navigation_enabled", cls.navigation_enabled)),
-            navigation_mode=str(data.get("navigation_mode", cls.navigation_mode)),
+            navigation_profile=str(data.get("navigation_profile", cls.navigation_profile)),
+            navigation_profiles=profiles,
             navigation_control_mode=str(
                 data.get("navigation_control_mode", cls.navigation_control_mode)
             ),
@@ -175,6 +207,9 @@ class AppSettings:
             ),
             navigation_deactivation_gesture=str(
                 data.get("navigation_deactivation_gesture", cls.navigation_deactivation_gesture)
+            ),
+            navigation_pan_gesture=str(
+                data.get("navigation_pan_gesture", cls.navigation_pan_gesture)
             ),
             navigation_activation_hold_ms=int(
                 data.get("navigation_activation_hold_ms", cls.navigation_activation_hold_ms)
@@ -200,6 +235,15 @@ class AppSettings:
             navigation_max_speed=float(
                 data.get("navigation_max_speed", cls.navigation_max_speed)
             ),
+            navigation_acceleration=float(
+                data.get("navigation_acceleration", cls.navigation_acceleration)
+            ),
+            navigation_mouse_scale=float(
+                data.get("navigation_mouse_scale", cls.navigation_mouse_scale)
+            ),
+            navigation_zoom_wheel_scale=float(
+                data.get("navigation_zoom_wheel_scale", cls.navigation_zoom_wheel_scale)
+            ),
             navigation_min_confidence=float(
                 data.get("navigation_min_confidence", cls.navigation_min_confidence)
             ),
@@ -215,9 +259,12 @@ class AppSettings:
             navigation_roll_enabled=_as_bool(
                 data.get("navigation_roll_enabled", cls.navigation_roll_enabled)
             ),
-            blender_host=str(data.get("blender_host", cls.blender_host)),
-            blender_port=int(data.get("blender_port", cls.blender_port)),
-            blender_reply_port=int(data.get("blender_reply_port", cls.blender_reply_port)),
+            navigation_global_hotkey=str(
+                data.get("navigation_global_hotkey", cls.navigation_global_hotkey)
+            ),
+            navigation_emergency_hotkey=str(
+                data.get("navigation_emergency_hotkey", cls.navigation_emergency_hotkey)
+            ),
         ).validate()
 
 

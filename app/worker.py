@@ -15,7 +15,6 @@ from typing import Any
 
 import cv2
 
-from .blender_transport import BlenderTransport
 from .calibration import CalibrationSession, CalibrationUpdate
 from .camera import CameraCapture
 from .face_tracker import FaceDetection, FaceTracker
@@ -27,6 +26,7 @@ from .gesture_detector import (
     normalized_pinch_distance,
 )
 from .hand_tracker import HandDetection, HandTracker
+from .input_controller import InputStatus, NavigationInputController
 from .keyboard_controller import KeyboardController
 from .model_paths import get_model_paths, model_install_message
 from .mouse_controller import MouseController
@@ -48,8 +48,7 @@ class FrameResult:
     camera_index: int
     calibration: CalibrationUpdate | None = None
     navigation: NavigationSnapshot | None = None
-    blender_connected: bool = False
-    blender_message: str = "Blender add-on not detected"
+    input_status: InputStatus | None = None
 
 
 class CameraWorker:
@@ -111,7 +110,7 @@ class CameraWorker:
         face_tracker: FaceTracker | None = None
         keyboard: KeyboardController | None = None
         mouse_controller: MouseController | None = None
-        blender_transport: BlenderTransport | None = None
+        input_controller: NavigationInputController | None = None
         navigation: TwoHandNavigation | None = None
         calibration: CalibrationSession | None = None
         fps_times: deque[float] = deque()
@@ -153,18 +152,19 @@ class CameraWorker:
             settings = self._read_settings()
             detector = GestureDetector(settings)
             navigation = TwoHandNavigation(settings)
-            blender_transport = BlenderTransport(
-                settings.blender_host,
-                settings.blender_port,
-                settings.blender_reply_port,
-            )
+            try:
+                input_controller = NavigationInputController(settings)
+                if not input_controller.start_hotkeys():
+                    self._notify("warning", input_controller.last_hotkey_error)
+            except Exception as exc:
+                self._notify("warning", f"OS navigation input is unavailable: {exc}")
 
             while not self._stop_event.is_set():
                 settings, calibration = self._apply_commands(
                     settings,
                     detector,
                     navigation,
-                    blender_transport,
+                    input_controller,
                     calibration,
                     camera,
                 )
@@ -182,8 +182,8 @@ class CameraWorker:
                     if not camera.open():
                         if navigation is not None:
                             navigation.reset()
-                        if blender_transport is not None:
-                            blender_transport.send_stop()
+                        if input_controller is not None:
+                            input_controller.stop()
                         now = time.monotonic()
                         if now - last_camera_notice > 3.0:
                             self._notify(
@@ -203,8 +203,8 @@ class CameraWorker:
                     detector.reset()
                     if navigation is not None:
                         navigation.reset()
-                    if blender_transport is not None:
-                        blender_transport.send_stop()
+                    if input_controller is not None:
+                        input_controller.stop()
                     self._notify(
                         "error",
                         f"Camera {settings.camera_index} stopped responding; retrying...",
@@ -231,15 +231,20 @@ class CameraWorker:
                     face,
                     force_disabled=is_calibrating,
                 )
-                navigation_snapshot = navigation.process(hands) if navigation else None
-                blender_status = (
-                    blender_transport.send(navigation_snapshot)
-                    if blender_transport is not None and navigation_snapshot is not None
+                navigation_snapshot = (
+                    navigation.process([] if is_calibrating else hands)
+                    if navigation
                     else None
                 )
+                input_status = (
+                    input_controller.apply(None if is_calibrating else navigation_snapshot)
+                    if input_controller is not None
+                    else None
+                )
+                air_mouse_active = settings.air_mouse_enabled and not settings.navigation_enabled
 
                 if (
-                    settings.air_mouse_enabled
+                    air_mouse_active
                     and settings.detection_enabled
                     and not is_calibrating
                     and mouse_controller is not None
@@ -252,7 +257,7 @@ class CameraWorker:
                         mouse_controller = None
 
                 if (
-                    settings.air_mouse_enabled
+                    air_mouse_active
                     and settings.detection_enabled
                     and not is_calibrating
                     and mouse_controller is not None
@@ -276,13 +281,13 @@ class CameraWorker:
                         self._notify("error", f"Could not send {settings.shortcut!r}: {exc}")
 
                 if snapshot.pinch_triggered:
-                    if settings.air_mouse_enabled and mouse_controller is not None:
+                    if air_mouse_active and mouse_controller is not None:
                         try:
                             mouse_controller.click()
                             self._notify("info", "Air Mouse click")
                         except Exception as exc:
                             self._notify("error", f"Could not click with Air Mouse: {exc}")
-                    elif not settings.air_mouse_enabled and keyboard is not None:
+                    elif not air_mouse_active and keyboard is not None:
                         try:
                             keyboard.press_shortcut(settings.pinch_shortcut)
                             self._notify(
@@ -350,22 +355,16 @@ class CameraWorker:
                         camera_index=settings.camera_index,
                         calibration=calibration_update,
                         navigation=navigation_snapshot,
-                        blender_connected=(blender_status.connected if blender_status else False),
-                        blender_message=(
-                            blender_status.message
-                            if blender_status
-                            else "Blender add-on not detected"
-                        ),
+                        input_status=input_status,
                     )
                 )
                 self._stop_event.wait(0.001)
         finally:
-            if blender_transport is not None:
+            if input_controller is not None:
                 try:
-                    blender_transport.send_stop()
+                    input_controller.close()
                 except Exception:
                     pass
-                blender_transport.close()
             if navigation is not None:
                 navigation.reset()
             if camera is not None:
@@ -386,7 +385,7 @@ class CameraWorker:
         settings: AppSettings,
         detector: GestureDetector,
         navigation: TwoHandNavigation,
-        blender_transport: BlenderTransport,
+        input_controller: NavigationInputController | None,
         calibration: CalibrationSession | None,
         camera: CameraCapture | None,
     ) -> tuple[AppSettings, CalibrationSession | None]:
@@ -399,11 +398,8 @@ class CameraWorker:
                 settings = value
                 detector.update_settings(settings)
                 navigation.update_settings(settings)
-                blender_transport.configure(
-                    settings.blender_host,
-                    settings.blender_port,
-                    settings.blender_reply_port,
-                )
+                if input_controller is not None:
+                    input_controller.update_settings(settings)
                 self._replace_settings(settings)
                 if camera is not None and camera.index != settings.camera_index:
                     camera.release()

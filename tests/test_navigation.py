@@ -109,6 +109,22 @@ class TwoHandNavigationTests(unittest.TestCase):
         self.assertEqual(moved.zoom, 0.0)
         self.assertAlmostEqual(moved.left_velocity_x, moved.right_velocity_x)
 
+    def test_full_mode_marks_closed_hands_as_pan_pose_and_serializes_profile(self) -> None:
+        navigation = TwoHandNavigation(self.settings)
+        open_hands = self._pair(0.30, 0.70, open_hand=True)
+        navigation.process(open_hands, now=0.0)
+        navigation.process(open_hands, now=0.71)
+
+        pan = navigation.process(
+            self._pair(0.30, 0.70, open_hand=False),
+            now=0.81,
+        )
+
+        self.assertTrue(pan.pan_pose)
+        self.assertEqual(pan.pose, "Pan pose")
+        self.assertEqual(pan.to_payload()["profile"], "Generic 3D")
+        self.assertEqual(pan.to_payload()["pan_pose"], True)
+
     def test_hands_moving_apart_zoom_in_and_together_zoom_out(self) -> None:
         navigation = TwoHandNavigation(self.settings)
         base = self._pair(0.30, 0.70, open_hand=True)
