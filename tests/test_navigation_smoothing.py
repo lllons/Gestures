@@ -63,6 +63,7 @@ class SmoothTwoHandNavigationTests(unittest.TestCase):
         self.settings = AppSettings(
             navigation_enabled=True,
             navigation_smoothing_frames=1,
+            navigation_orbit_lock_enabled=False,
             navigation_smoothing=0.35,
             navigation_dead_zone=0.0,
             navigation_max_speed=5.0,

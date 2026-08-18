@@ -55,6 +55,7 @@ class TwoHandNavigationTests(unittest.TestCase):
         self.settings = AppSettings(
             navigation_enabled=True,
             navigation_smoothing_frames=1,
+            navigation_orbit_lock_enabled=False,
             navigation_dead_zone=0.0,
             navigation_max_speed=5.0,
             navigation_orbit_sensitivity=1.0,

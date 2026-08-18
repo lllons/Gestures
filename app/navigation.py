@@ -104,6 +104,22 @@ class NavigationSnapshot:
     dead_zone_active: bool = False
     outlier_rejected: bool = False
     hand_loss_frames: int = 0
+    orbit_lock_active: bool = False
+    orbit_lock_hands: tuple[str, ...] = ()
+    left_ring_thumb_distance: float | None = None
+    right_ring_thumb_distance: float | None = None
+    left_ring_thumb_touch: bool = False
+    right_ring_thumb_touch: bool = False
+
+    @property
+    def orbit_lock_hand(self) -> str:
+        """Return the user-facing hand label for the active lock."""
+
+        if not self.orbit_lock_active or not self.orbit_lock_hands:
+            return "NONE"
+        if len(self.orbit_lock_hands) > 1:
+            return "BOTH"
+        return self.orbit_lock_hands[0]
 
     @property
     def hands_ready(self) -> bool:
@@ -165,6 +181,15 @@ class NavigationSnapshot:
             "dead_zone_active": self.dead_zone_active,
             "outlier_rejected": self.outlier_rejected,
             "hand_loss_frames": self.hand_loss_frames,
+            "orbit_lock": {
+                "active": self.orbit_lock_active,
+                "hands": list(self.orbit_lock_hands),
+                "activating_hand": self.orbit_lock_hand,
+                "left_distance": self.left_ring_thumb_distance,
+                "right_distance": self.right_ring_thumb_distance,
+                "left_touch": self.left_ring_thumb_touch,
+                "right_touch": self.right_ring_thumb_touch,
+            },
             "calibration": {
                 "complete": self.calibration_completed,
                 "succeeded": self.calibration_succeeded,
@@ -183,6 +208,19 @@ class _PairFeatures:
     midpoint: Landmark
     distance: float
     angle: float
+
+
+@dataclass(frozen=True)
+class _OrbitLockFrame:
+    """The deterministic ring-thumb contact result for one camera frame."""
+
+    active: bool
+    hands: tuple[str, ...]
+    sources: dict[str, HandDetection]
+    left_distance: float | None
+    right_distance: float | None
+    left_touch: bool
+    right_touch: bool
 
 
 class OneEuroFilter:
@@ -350,6 +388,7 @@ class TwoHandNavigation:
         self._midpoint_filter = _PointFilter()
         self._distance_filter = OneEuroFilter()
         self._angle_filter = _AngleFilter()
+        self._orbit_lock_filter = _PointFilter()
         self._configure_filters()
 
         self._active = False
@@ -365,6 +404,17 @@ class TwoHandNavigation:
         self._translation_engaged = False
         self._zoom_engaged = False
         self._roll_engaged = False
+        self._orbit_lock_active = False
+        self._orbit_lock_hands: tuple[str, ...] = ()
+        self._orbit_lock_states = {"LEFT": False, "RIGHT": False}
+        self._orbit_lock_source_centers: dict[str, Landmark] = {}
+        self._orbit_lock_left_distance: float | None = None
+        self._orbit_lock_right_distance: float | None = None
+        self._orbit_lock_left_touch = False
+        self._orbit_lock_right_touch = False
+        self._orbit_lock_previous_point: Landmark | None = None
+        self._orbit_lock_previous_time: float | None = None
+        self._orbit_lock_just_released = False
         self._calibration_active = False
         self._calibration_started_at = 0.0
         self._calibration_samples: list[_PairFeatures] = []
@@ -381,6 +431,10 @@ class TwoHandNavigation:
         self._configure_filters()
         if not settings.navigation_enabled:
             self.reset()
+        elif not settings.navigation_orbit_lock_enabled:
+            # Disabling the optional lock must not deactivate ordinary 3D
+            # navigation; it only clears the lock's private state.
+            self._clear_orbit_lock()
 
     def reset(self) -> None:
         """Stop navigation and clear temporal movement state."""
@@ -390,6 +444,7 @@ class TwoHandNavigation:
         self._deactivation_started_at = None
         self._calibration_active = False
         self._calibration_samples.clear()
+        self._clear_orbit_lock()
         self._clear_tracking_baseline()
         # Keep a completed neutral calibration; reset is also used for camera
         # reconnects and should not discard the user's saved reference.
@@ -422,10 +477,23 @@ class TwoHandNavigation:
         """Interpret one frame without blocking the camera worker."""
 
         current_time = time.monotonic() if now is None else now
+        orbit_lock_frame = (
+            self._update_orbit_lock(hands)
+            if self._settings.navigation_enabled
+            and self._settings.navigation_orbit_lock_enabled
+            else self._clear_orbit_lock()
+        )
         pair = _ordered_pair(hands, self._previous_features)
-        confidence = _pair_confidence(pair)
+        confidence = _pair_confidence(pair) if pair is not None else _hands_confidence(hands)
 
         if pair is None:
+            if orbit_lock_frame.active:
+                return self._process_orbit_lock(
+                    orbit_lock_frame,
+                    hands,
+                    confidence,
+                    current_time,
+                )
             return self._process_missing(hands, confidence, current_time)
 
         self._missed_frames = 0
@@ -494,6 +562,20 @@ class TwoHandNavigation:
                 outlier_rejected,
             )
 
+        if orbit_lock_frame.active:
+            return self._process_orbit_lock(
+                orbit_lock_frame,
+                hands,
+                confidence,
+                current_time,
+                pair=pair,
+                features=features,
+                raw_centers=raw_centers,
+                raw_midpoint=raw_midpoint,
+                raw_distance=raw_distance,
+                outlier_rejected=outlier_rejected,
+            )
+
         if confidence < self._settings.navigation_min_confidence:
             was_active = self._active
             self._active = False
@@ -510,6 +592,24 @@ class TwoHandNavigation:
                 raw_distance=raw_distance,
                 outlier_rejected=outlier_rejected,
                 message="Tracking confidence low; navigation stopped",
+            )
+
+        if rebaselined and self._orbit_lock_just_released:
+            self._previous_features = features
+            self._previous_time = current_time
+            self._translation_engaged = False
+            self._zoom_engaged = False
+            self._roll_engaged = False
+            return self._snapshot(
+                state=NavigationState.ACTIVE if self._active else NavigationState.IDLE,
+                hands=hands,
+                pair=pair,
+                centers=(features.left, features.right),
+                raw_centers=raw_centers,
+                raw_midpoint=raw_midpoint,
+                raw_distance=raw_distance,
+                outlier_rejected=outlier_rejected,
+                message="Orbit lock released; movement baseline reset",
             )
 
         if rebaselined and self._active:
@@ -682,6 +782,191 @@ class TwoHandNavigation:
         self._angle_filter.configure(
             **_filter_parameters(self._settings, self._settings.navigation_orbit_smoothing)
         )
+        self._orbit_lock_filter.configure(
+            **_filter_parameters(self._settings, self._settings.navigation_orbit_smoothing)
+        )
+
+    def _process_orbit_lock(
+        self,
+        lock: _OrbitLockFrame,
+        hands: list[HandDetection],
+        confidence: float,
+        current_time: float,
+        *,
+        pair: tuple[HandDetection, HandDetection] | None = None,
+        features: _PairFeatures | None = None,
+        raw_centers: tuple[Landmark, Landmark] | None = None,
+        raw_midpoint: Landmark | None = None,
+        raw_distance: float | None = None,
+        outlier_rejected: bool = False,
+    ) -> NavigationSnapshot:
+        """Generate orbit-only relative motion while contact is held.
+
+        This path deliberately bypasses the normal two-hand activation pose and
+        control-mode classifier. The contact rule is already the complete
+        gesture decision, so one contacting hand can start orbiting immediately.
+        """
+
+        control_point = _orbit_lock_control_point(lock)
+        if control_point is None:
+            return self._process_missing(hands, confidence, current_time)
+
+        filtered_point = self._orbit_lock_filter.filter(control_point, current_time)
+        previous = self._orbit_lock_previous_point
+        previous_time = self._orbit_lock_previous_time
+        self._orbit_lock_previous_point = filtered_point
+        self._orbit_lock_previous_time = current_time
+        if features is not None:
+            # Keep the general analyzer's baseline current while the lock owns
+            # output, so releasing the lock cannot produce a catch-up jump.
+            self._previous_features = features
+            self._previous_time = current_time
+            self._translation_engaged = False
+            self._zoom_engaged = False
+            self._roll_engaged = False
+
+        orbit_x = 0.0
+        orbit_y = 0.0
+        velocity_x = 0.0
+        velocity_y = 0.0
+        confidence_gain = confidence_control_gain(
+            confidence,
+            self._settings.navigation_min_confidence,
+        )
+        if previous is not None and previous_time is not None:
+            dt = _frame_delta(current_time, previous_time)
+            velocity_x = (filtered_point.x - previous.x) / dt
+            velocity_y = (filtered_point.y - previous.y) / dt
+            velocity_x *= confidence_gain
+            velocity_y *= confidence_gain
+            dead_zone = _channel_dead_zone(
+                self._settings.navigation_dead_zone,
+                self._settings.navigation_orbit_dead_zone,
+            ) * 60.0
+            if math.hypot(velocity_x, velocity_y) < max(
+                dead_zone,
+                self._settings.navigation_motion_stop_threshold,
+            ):
+                velocity_x = velocity_y = 0.0
+            direction_x = -1.0 if self._settings.navigation_invert_x else 1.0
+            direction_y = -1.0 if self._settings.navigation_invert_y else 1.0
+            orbit_x, orbit_y = _vector_response(
+                velocity_x * direction_x,
+                -velocity_y * direction_y,
+                self._settings.navigation_orbit_sensitivity,
+                self._settings.navigation_orbit_acceleration,
+                self._settings.navigation_orbit_max_speed,
+                dt,
+                confidence_gain,
+            )
+
+        tracking_ok = confidence >= self._settings.navigation_min_confidence
+        state = NavigationState.ACTIVE if tracking_ok else NavigationState.LOST
+        if not tracking_ok:
+            orbit_x = orbit_y = 0.0
+        left_source = lock.sources.get("LEFT")
+        right_source = lock.sources.get("RIGHT")
+        left_point = hand_center(left_source) if left_source is not None else None
+        right_point = hand_center(right_source) if right_source is not None else None
+        message = (
+            f"ORBIT LOCK: ACTIVE ({_orbit_lock_hand_label(lock.hands)})"
+            if tracking_ok
+            else "Orbit lock stopped; tracking confidence low"
+        )
+        return self._snapshot(
+            state=state,
+            hands=hands,
+            pair=pair,
+            left_hand_point=left_point,
+            right_hand_point=right_point,
+            raw_centers=raw_centers,
+            raw_midpoint=raw_midpoint,
+            raw_distance=raw_distance,
+            filtered_distance=features.distance if features else None,
+            filtered_angle=features.angle if features else None,
+            confidence=confidence,
+            confidence_gain=confidence_gain,
+            midpoint_velocity_x=velocity_x,
+            midpoint_velocity_y=velocity_y,
+            left_velocity_x=velocity_x,
+            left_velocity_y=velocity_y,
+            right_velocity_x=velocity_x,
+            right_velocity_y=velocity_y,
+            orbit_x=orbit_x,
+            orbit_y=orbit_y,
+            gesture="Orbit Lock" if tracking_ok else "Idle",
+            smoothing_amount=_effective_smoothing(self._settings),
+            dead_zone_active=orbit_x == 0.0 and orbit_y == 0.0,
+            outlier_rejected=outlier_rejected,
+            message=message,
+        )
+
+    def _update_orbit_lock(self, hands: list[HandDetection]) -> _OrbitLockFrame:
+        sources = _orbit_lock_sources(hands, self._orbit_lock_source_centers)
+        previous_active = self._orbit_lock_active
+        previous_hands = self._orbit_lock_hands
+        activation_threshold = self._settings.navigation_orbit_lock_activation_threshold
+        release_threshold = self._settings.navigation_orbit_lock_release_threshold
+        for side in ("LEFT", "RIGHT"):
+            source = sources.get(side)
+            distance = ring_thumb_distance(source) if source is not None else None
+            was_touching = self._orbit_lock_states.get(side, False)
+            touching = (
+                distance is not None
+                and distance
+                <= (release_threshold if was_touching else activation_threshold) + 1e-9
+            )
+            self._orbit_lock_states[side] = touching
+            if side == "LEFT":
+                self._orbit_lock_left_distance = distance
+                self._orbit_lock_left_touch = touching
+            else:
+                self._orbit_lock_right_distance = distance
+                self._orbit_lock_right_touch = touching
+            if source is not None:
+                self._orbit_lock_source_centers[side] = hand_center(source)
+
+        active_hands = tuple(
+            side for side in ("LEFT", "RIGHT") if self._orbit_lock_states.get(side, False)
+        )
+        self._orbit_lock_active = bool(active_hands)
+        self._orbit_lock_hands = active_hands
+        self._orbit_lock_just_released = previous_active and not self._orbit_lock_active
+        if self._orbit_lock_active and (
+            not previous_active or active_hands != previous_hands
+        ):
+            self._orbit_lock_filter.reset()
+            self._orbit_lock_previous_point = None
+            self._orbit_lock_previous_time = None
+        elif self._orbit_lock_just_released:
+            self._orbit_lock_filter.reset()
+            self._orbit_lock_previous_point = None
+            self._orbit_lock_previous_time = None
+            self._needs_rebaseline = True
+        return _OrbitLockFrame(
+            active=self._orbit_lock_active,
+            hands=active_hands,
+            sources=dict(sources),
+            left_distance=self._orbit_lock_left_distance,
+            right_distance=self._orbit_lock_right_distance,
+            left_touch=self._orbit_lock_left_touch,
+            right_touch=self._orbit_lock_right_touch,
+        )
+
+    def _clear_orbit_lock(self) -> _OrbitLockFrame:
+        self._orbit_lock_active = False
+        self._orbit_lock_hands = ()
+        self._orbit_lock_states = {"LEFT": False, "RIGHT": False}
+        self._orbit_lock_source_centers.clear()
+        self._orbit_lock_left_distance = None
+        self._orbit_lock_right_distance = None
+        self._orbit_lock_left_touch = False
+        self._orbit_lock_right_touch = False
+        self._orbit_lock_previous_point = None
+        self._orbit_lock_previous_time = None
+        self._orbit_lock_filter.reset()
+        self._orbit_lock_just_released = False
+        return _OrbitLockFrame(False, (), {}, None, None, False, False)
 
     def _reject_outlier(
         self,
@@ -1089,6 +1374,8 @@ class TwoHandNavigation:
         confidence: float,
         message: str,
         centers: tuple[Landmark, Landmark] | None = None,
+        left_hand_point: Landmark | None = None,
+        right_hand_point: Landmark | None = None,
         raw_centers: tuple[Landmark, Landmark] | None = None,
         raw_midpoint: Landmark | None = None,
         raw_distance: float | None = None,
@@ -1128,8 +1415,8 @@ class TwoHandNavigation:
             centers = (hand_center(pair[0]), hand_center(pair[1]))
         if raw_centers is None and pair is not None:
             raw_centers = (hand_center(pair[0]), hand_center(pair[1]))
-        left_point = centers[0] if centers else None
-        right_point = centers[1] if centers else None
+        left_point = left_hand_point if left_hand_point is not None else (centers[0] if centers else None)
+        right_point = right_hand_point if right_hand_point is not None else (centers[1] if centers else None)
         midpoint = midpoint_between_hands(left_point, right_point)
         distance = (
             filtered_distance
@@ -1148,7 +1435,7 @@ class TwoHandNavigation:
         return NavigationSnapshot(
             state=state,
             enabled=self._settings.navigation_enabled,
-            active=self._active and state is NavigationState.ACTIVE,
+            active=(self._active or self._orbit_lock_active) and state is NavigationState.ACTIVE,
             hand_count=len(hands),
             left_hand=left_point,
             right_hand=right_point,
@@ -1195,6 +1482,12 @@ class TwoHandNavigation:
             dead_zone_active=dead_zone_active,
             outlier_rejected=outlier_rejected,
             hand_loss_frames=hand_loss_frames,
+            orbit_lock_active=self._orbit_lock_active,
+            orbit_lock_hands=self._orbit_lock_hands,
+            left_ring_thumb_distance=self._orbit_lock_left_distance,
+            right_ring_thumb_distance=self._orbit_lock_right_distance,
+            left_ring_thumb_touch=self._orbit_lock_left_touch,
+            right_ring_thumb_touch=self._orbit_lock_right_touch,
         )
 
     def _clear_tracking_baseline(self) -> None:
@@ -1216,6 +1509,7 @@ class TwoHandNavigation:
         self._midpoint_filter.reset()
         self._distance_filter.reset()
         self._angle_filter.reset()
+        self._orbit_lock_filter.reset()
 
 
 def hand_center(hand: HandDetection) -> Landmark:
@@ -1231,6 +1525,26 @@ def hand_center(hand: HandDetection) -> Landmark:
         y=sum(point.y for point in available) / count,
         z=sum(point.z for point in available) / count,
     )
+
+
+def ring_thumb_distance(hand: HandDetection | None) -> float | None:
+    """Return the normalized 2D distance between thumb tip (4) and ring tip (16)."""
+
+    if hand is None or len(hand.landmarks) <= 16:
+        return None
+    thumb = hand.landmarks[4]
+    ring = hand.landmarks[16]
+    return math.hypot(ring.x - thumb.x, ring.y - thumb.y)
+
+
+def is_ring_thumb_touching(
+    hand: HandDetection | None,
+    threshold: float = 0.035,
+) -> bool:
+    """Return the deterministic activation result without retaining state."""
+
+    distance = ring_thumb_distance(hand)
+    return distance is not None and distance <= threshold + 1e-9
 
 
 def distance_between_hands(
@@ -1411,6 +1725,96 @@ def _deactivation_pose(
     if gesture == "Two open hands":
         return all(hand_is_open(hand) for hand in pair)
     return False
+
+
+def _orbit_lock_sources(
+    hands: list[HandDetection],
+    previous_centers: dict[str, Landmark],
+) -> dict[str, HandDetection]:
+    """Assign one or two detected hands to stable LEFT/RIGHT slots."""
+
+    valid = [hand for hand in hands if len(hand.landmarks) > 16]
+    if len(valid) > 2:
+        valid = sorted(
+            valid,
+            key=lambda hand: hand.confidence if hand.confidence is not None else 1.0,
+            reverse=True,
+        )[:2]
+    if not valid:
+        return {}
+
+    labelled: dict[str, HandDetection] = {}
+    unlabelled: list[HandDetection] = []
+    for hand in valid:
+        label = (hand.handedness or "").casefold()
+        if label in {"left", "right"} and label.upper() not in labelled:
+            labelled[label.upper()] = hand
+        else:
+            unlabelled.append(hand)
+
+    if len(valid) == 1:
+        if labelled:
+            return labelled
+        center = hand_center(valid[0])
+        if previous_centers:
+            side = min(
+                previous_centers,
+                key=lambda candidate: _point_distance(center, previous_centers[candidate]),
+            )
+        else:
+            side = "LEFT" if center.x <= 0.5 else "RIGHT"
+        return {side: valid[0]}
+
+    if not labelled:
+        ordered = sorted(valid, key=lambda hand: hand_center(hand).x)
+        if "LEFT" in previous_centers and "RIGHT" in previous_centers:
+            first_center = hand_center(ordered[0])
+            second_center = hand_center(ordered[1])
+            normal = _point_distance(first_center, previous_centers["LEFT"]) + _point_distance(
+                second_center, previous_centers["RIGHT"]
+            )
+            swapped = _point_distance(first_center, previous_centers["RIGHT"]) + _point_distance(
+                second_center, previous_centers["LEFT"]
+            )
+            return (
+                {"LEFT": ordered[0], "RIGHT": ordered[1]}
+                if normal <= swapped
+                else {"LEFT": ordered[1], "RIGHT": ordered[0]}
+            )
+        return {"LEFT": ordered[0], "RIGHT": ordered[1]}
+
+    result = dict(labelled)
+    missing = [side for side in ("LEFT", "RIGHT") if side not in result]
+    if missing and unlabelled:
+        result[missing[0]] = unlabelled[0]
+    return result
+
+
+def _orbit_lock_control_point(lock: _OrbitLockFrame) -> Landmark | None:
+    points = [hand_center(lock.sources[side]) for side in lock.hands if side in lock.sources]
+    if not points:
+        return None
+    count = len(points)
+    return Landmark(
+        x=sum(point.x for point in points) / count,
+        y=sum(point.y for point in points) / count,
+        z=sum(point.z for point in points) / count,
+    )
+
+
+def _orbit_lock_hand_label(hands: tuple[str, ...]) -> str:
+    if len(hands) > 1:
+        return "BOTH"
+    return hands[0] if hands else "NONE"
+
+
+def _hands_confidence(hands: list[HandDetection]) -> float:
+    values = [
+        hand.confidence
+        for hand in hands
+        if hand.confidence is not None and math.isfinite(hand.confidence)
+    ]
+    return max(0.0, min(1.0, min(values) if values else 1.0)) if hands else 0.0
 
 
 def _ordered_pair(

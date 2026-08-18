@@ -71,6 +71,14 @@ class AppSettings:
     navigation_invert_zoom: bool = False
     navigation_roll_enabled: bool = False
 
+    # Deterministic thumb + ring-finger orbit lock. This gesture is evaluated
+    # only while 3D Navigation is enabled and uses hysteresis so contact does
+    # not flicker around the threshold.
+    navigation_orbit_lock_enabled: bool = True
+    navigation_orbit_lock_activation_threshold: float = 0.035
+    navigation_orbit_lock_release_threshold: float = 0.050
+    navigation_orbit_lock_button: str = "middle"
+
     # Low-latency navigation signal processing. Values are normalized hand
     # coordinates or normalized units/second, not screen pixels.
     navigation_smoothing: float = 0.45
@@ -117,6 +125,8 @@ class AppSettings:
                 self.navigation_pan_sensitivity,
                 self.navigation_zoom_sensitivity,
                 self.navigation_roll_sensitivity,
+                self.navigation_orbit_lock_activation_threshold,
+                self.navigation_orbit_lock_release_threshold,
                 self.navigation_dead_zone,
                 self.navigation_smoothing,
                 self.navigation_orbit_smoothing,
@@ -187,6 +197,16 @@ class AppSettings:
             raise SettingsError("Zoom sensitivity must be between 0.1 and 20.")
         if not 0.1 <= self.navigation_roll_sensitivity <= 20:
             raise SettingsError("Roll sensitivity must be between 0.1 and 20.")
+        if not 0.001 <= self.navigation_orbit_lock_activation_threshold <= 0.5:
+            raise SettingsError("Orbit-lock activation threshold must be between 0.001 and 0.50.")
+        if not (
+            self.navigation_orbit_lock_activation_threshold
+            <= self.navigation_orbit_lock_release_threshold
+            <= 0.5
+        ):
+            raise SettingsError("Orbit-lock release threshold must be at least activation threshold and at most 0.50.")
+        if self.navigation_orbit_lock_button not in {"left", "middle", "right"}:
+            raise SettingsError("Orbit-lock mouse button is not supported.")
         if not 1 <= self.navigation_smoothing_frames <= 20:
             raise SettingsError("Navigation smoothing must be between 1 and 20 frames.")
         if not 0 <= self.navigation_dead_zone <= 0.10:
@@ -375,6 +395,24 @@ class AppSettings:
             navigation_roll_enabled=_as_bool(
                 data.get("navigation_roll_enabled", cls.navigation_roll_enabled)
             ),
+            navigation_orbit_lock_enabled=_as_bool(
+                data.get("navigation_orbit_lock_enabled", cls.navigation_orbit_lock_enabled)
+            ),
+            navigation_orbit_lock_activation_threshold=float(
+                data.get(
+                    "navigation_orbit_lock_activation_threshold",
+                    cls.navigation_orbit_lock_activation_threshold,
+                )
+            ),
+            navigation_orbit_lock_release_threshold=float(
+                data.get(
+                    "navigation_orbit_lock_release_threshold",
+                    cls.navigation_orbit_lock_release_threshold,
+                )
+            ),
+            navigation_orbit_lock_button=str(
+                data.get("navigation_orbit_lock_button", cls.navigation_orbit_lock_button)
+            ).casefold(),
             navigation_smoothing=float(
                 data.get("navigation_smoothing", cls.navigation_smoothing)
             ),

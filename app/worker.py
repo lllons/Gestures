@@ -30,7 +30,7 @@ from .input_controller import InputStatus, NavigationInputController
 from .keyboard_controller import KeyboardController
 from .model_paths import get_model_paths, model_install_message
 from .mouse_controller import MouseController
-from .navigation import NavigationSnapshot, TwoHandNavigation
+from .navigation import NavigationSnapshot, TwoHandNavigation, ring_thumb_distance
 from .settings import AppSettings, SettingsStore
 
 
@@ -557,7 +557,7 @@ def _draw_overlay(
             )
 
     if navigation is not None:
-        _draw_navigation_overlay(frame, navigation, width, height)
+        _draw_navigation_overlay(frame, navigation, hands, settings, width, height)
 
     if snapshot.nose is not None:
         nose_point = (_px(snapshot.nose.x, width), _px(snapshot.nose.y, height))
@@ -675,12 +675,43 @@ def _draw_overlay(
 def _draw_navigation_overlay(
     frame: Any,
     navigation: NavigationSnapshot,
+    hands: list[HandDetection],
+    settings: AppSettings,
     width: int,
     height: int,
 ) -> None:
-    """Draw the two-hand navigation geometry and current analog vectors."""
+    """Draw navigation geometry, including the opt-in orbit-lock contact."""
 
     active_color = (80, 255, 150) if navigation.active else (180, 180, 80)
+    if navigation.enabled and settings.navigation_orbit_lock_enabled:
+        for hand in hands:
+            if len(hand.landmarks) <= 16:
+                continue
+            thumb = hand.landmarks[4]
+            ring = hand.landmarks[16]
+            contact_distance = ring_thumb_distance(hand)
+            contact = (
+                contact_distance is not None
+                and contact_distance
+                <= settings.navigation_orbit_lock_activation_threshold + 1e-9
+            )
+            contact_color = (0, 255, 80) if contact else (0, 190, 255)
+            thumb_point = (_px(thumb.x, width), _px(thumb.y, height))
+            ring_point = (_px(ring.x, width), _px(ring.y, height))
+            cv2.line(frame, thumb_point, ring_point, contact_color, 4)
+            cv2.circle(frame, thumb_point, 6, contact_color, -1)
+            cv2.circle(frame, ring_point, 6, contact_color, -1)
+        if navigation.orbit_lock_active:
+            cv2.putText(
+                frame,
+                f"ORBIT LOCK: ACTIVE - {navigation.orbit_lock_hand}",
+                (18, 88),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.62,
+                (0, 255, 80),
+                2,
+                cv2.LINE_AA,
+            )
     if navigation.left_hand is not None and navigation.right_hand is not None:
         left = (_px(navigation.left_hand.x, width), _px(navigation.left_hand.y, height))
         right = (_px(navigation.right_hand.x, width), _px(navigation.right_hand.y, height))

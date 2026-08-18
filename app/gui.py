@@ -215,6 +215,18 @@ class GesturesApp:
         self.navigation_roll_enabled_var = tk.BooleanVar(
             value=self.settings.navigation_roll_enabled
         )
+        self.navigation_orbit_lock_enabled_var = tk.BooleanVar(
+            value=self.settings.navigation_orbit_lock_enabled
+        )
+        self.navigation_orbit_lock_activation_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_lock_activation_threshold
+        )
+        self.navigation_orbit_lock_release_var = tk.DoubleVar(
+            value=self.settings.navigation_orbit_lock_release_threshold
+        )
+        self.navigation_orbit_lock_button_var = tk.StringVar(
+            value=self.settings.navigation_orbit_lock_button
+        )
         self.navigation_global_hotkey_var = tk.StringVar(
             value=self.settings.navigation_global_hotkey
         )
@@ -242,6 +254,8 @@ class GesturesApp:
         self.navigation_deadzone_status_var = tk.StringVar(value="Idle")
         self.navigation_outlier_status_var = tk.StringVar(value="No")
         self.navigation_precision_status_var = tk.StringVar(value="Normal 1.00x")
+        self.navigation_orbit_lock_status_var = tk.StringVar(value="OFF")
+        self.navigation_orbit_lock_hand_var = tk.StringVar(value="NONE")
 
         self.status_var = tk.StringVar(value="READY")
         self.detail_var = tk.StringVar(value="")
@@ -523,6 +537,8 @@ class GesturesApp:
         self._metric(nav_metrics, "Dead zone", self.navigation_deadzone_status_var, 13)
         self._metric(nav_metrics, "Outlier", self.navigation_outlier_status_var, 14)
         self._metric(nav_metrics, "Speed mode", self.navigation_precision_status_var, 15)
+        self._metric(nav_metrics, "Orbit lock", self.navigation_orbit_lock_status_var, 16)
+        self._metric(nav_metrics, "Lock hand", self.navigation_orbit_lock_hand_var, 17)
 
         profile_row = ttk.Frame(parent, style="Panel.TFrame")
         profile_row.pack(fill=tk.X, pady=3)
@@ -927,6 +943,37 @@ class GesturesApp:
             text="Enable roll from hand angle",
             variable=self.navigation_roll_enabled_var,
         ).pack(anchor="w", pady=2)
+        ttk.Checkbutton(
+            nav_toggles,
+            text="Enable ring + thumb Orbit Lock",
+            variable=self.navigation_orbit_lock_enabled_var,
+        ).pack(anchor="w", pady=2)
+        self._scale_control(
+            parent,
+            "Orbit-lock activation distance",
+            self.navigation_orbit_lock_activation_var,
+            0.005,
+            0.15,
+            0.001,
+            format_value=lambda value: f"{value:.3f}",
+            command=self._apply_settings_live,
+        )
+        self._scale_control(
+            parent,
+            "Orbit-lock release distance",
+            self.navigation_orbit_lock_release_var,
+            0.005,
+            0.20,
+            0.001,
+            format_value=lambda value: f"{value:.3f}",
+            command=self._apply_settings_live,
+        )
+        self._navigation_combo(
+            parent,
+            "Orbit-lock button",
+            self.navigation_orbit_lock_button_var,
+            MOUSE_BUTTON_OPTIONS,
+        )
         ttk.Checkbutton(
             nav_toggles,
             text="Adaptive smoothing (One Euro beta)",
@@ -1381,6 +1428,14 @@ class GesturesApp:
             navigation_invert_y=bool(self.navigation_invert_y_var.get()),
             navigation_invert_zoom=bool(self.navigation_invert_zoom_var.get()),
             navigation_roll_enabled=bool(self.navigation_roll_enabled_var.get()),
+            navigation_orbit_lock_enabled=bool(self.navigation_orbit_lock_enabled_var.get()),
+            navigation_orbit_lock_activation_threshold=round(
+                float(self.navigation_orbit_lock_activation_var.get()), 3
+            ),
+            navigation_orbit_lock_release_threshold=round(
+                float(self.navigation_orbit_lock_release_var.get()), 3
+            ),
+            navigation_orbit_lock_button=self.navigation_orbit_lock_button_var.get().casefold(),
             navigation_global_hotkey=self.navigation_global_hotkey_var.get().strip(),
             navigation_emergency_hotkey=self.navigation_emergency_hotkey_var.get().strip(),
         )
@@ -1457,6 +1512,8 @@ class GesturesApp:
         self.navigation_deadzone_status_var.set("Idle")
         self.navigation_outlier_status_var.set("No")
         self.navigation_precision_status_var.set("Normal 1.00x")
+        self.navigation_orbit_lock_status_var.set("OFF")
+        self.navigation_orbit_lock_hand_var.set("NONE")
 
     def calibrate(self) -> None:
         if not self.worker.is_running():
@@ -1575,6 +1632,8 @@ class GesturesApp:
         input_status = result.input_status
         if navigation is None:
             self.navigation_status_var.set("DISABLED")
+            self.navigation_orbit_lock_status_var.set("OFF")
+            self.navigation_orbit_lock_hand_var.set("NONE")
             return
 
         if not navigation.enabled:
@@ -1588,6 +1647,12 @@ class GesturesApp:
         else:
             status = "READY"
         self.navigation_status_var.set(status)
+        if navigation.enabled and navigation.orbit_lock_active:
+            self.navigation_orbit_lock_status_var.set("ACTIVE")
+            self.navigation_orbit_lock_hand_var.set(navigation.orbit_lock_hand)
+        else:
+            self.navigation_orbit_lock_status_var.set("OFF")
+            self.navigation_orbit_lock_hand_var.set("NONE")
         if input_status is not None and input_status.message:
             self.detail_var.set(input_status.message)
 

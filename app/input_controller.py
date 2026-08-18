@@ -166,11 +166,18 @@ class NavigationInputController:
 
     def update_settings(self, settings: AppSettings) -> None:
         with self._lock:
+            lock_was_enabled = self._settings.navigation_orbit_lock_enabled
             self._settings = settings
             if not settings.navigation_enabled:
                 self._release_held_locked()
                 self._state = InputState.DISABLED
                 self._message = "3D navigation is disabled"
+            elif lock_was_enabled and not settings.navigation_orbit_lock_enabled:
+                # Turning the dedicated lock off must release its orbit button
+                # immediately, without affecting ordinary navigation settings.
+                self._release_held_locked()
+                self._state = InputState.NAVIGATION_READY
+                self._message = "Orbit lock disabled; simulated input released"
             elif self._state is InputState.DISABLED and self._global_enabled:
                 self._state = InputState.NAVIGATION_READY
                 self._message = "Press F8 or use the activation pose to navigate"
@@ -266,10 +273,14 @@ class NavigationInputController:
                         self._message = "3D navigation is disabled"
                     return self.status
 
+                orbit_lock_active = bool(
+                    snapshot is not None
+                    and getattr(snapshot, "orbit_lock_active", False)
+                )
                 if (
                     snapshot is None
                     or not snapshot.active
-                    or snapshot.hand_count != 2
+                    or (snapshot.hand_count != 2 and not (orbit_lock_active and snapshot.hand_count >= 1))
                     or getattr(snapshot, "gesture", "") == "Deactivating"
                 ):
                     was_holding = bool(self._held_button or self._held_modifiers)
@@ -300,35 +311,47 @@ class NavigationInputController:
                     self._settings.navigation_profiles,
                 )
                 control_mode = snapshot.control_mode
-                pan = (
-                    (
-                        control_mode == "PAN"
-                        or (
-                            control_mode == "FULL 3D"
-                            and snapshot.pan_pose
+                if orbit_lock_active:
+                    # Orbit lock is a hard priority: it owns the configured
+                    # orbit button and suppresses pan, zoom, roll, and every
+                    # other navigation classifier until contact is released.
+                    pan = False
+                    orbit = True
+                    allow_zoom = False
+                else:
+                    pan = (
+                        (
+                            control_mode == "PAN"
+                            or (
+                                control_mode == "FULL 3D"
+                                and snapshot.pan_pose
+                            )
+                        )
+                        and (abs(snapshot.pan_x) + abs(snapshot.pan_y) > 1e-12)
+                    )
+                    orbit = (
+                        control_mode in {"ORBIT", "FULL 3D"}
+                        and not pan
+                        and (
+                            abs(snapshot.orbit_x)
+                            + abs(snapshot.orbit_y)
+                            + abs(getattr(snapshot, "roll", 0.0))
+                            > 1e-12
                         )
                     )
-                    and (abs(snapshot.pan_x) + abs(snapshot.pan_y) > 1e-12)
-                )
-                orbit = (
-                    control_mode in {"ORBIT", "FULL 3D"}
-                    and not pan
-                    and (
-                        abs(snapshot.orbit_x)
-                        + abs(snapshot.orbit_y)
-                        + abs(getattr(snapshot, "roll", 0.0))
-                        > 1e-12
-                    )
-                )
-                allow_zoom = control_mode in {"ZOOM", "FULL 3D"}
-                if control_mode == "ZOOM":
-                    orbit = False
-                    pan = False
+                    allow_zoom = control_mode in {"ZOOM", "FULL 3D"}
+                    if control_mode == "ZOOM":
+                        orbit = False
+                        pan = False
 
                 desired_button: str | None = None
                 desired_modifiers: tuple[str, ...] = ()
                 if orbit:
-                    desired_button = profile.orbit_button
+                    desired_button = (
+                        self._settings.navigation_orbit_lock_button
+                        if orbit_lock_active
+                        else profile.orbit_button
+                    )
                     desired_modifiers = profile.orbit_modifiers
                 elif pan:
                     desired_button = profile.pan_button
@@ -336,8 +359,12 @@ class NavigationInputController:
                 self._transition_held_locked(desired_button, desired_modifiers)
 
                 if orbit:
-                    motion_x = snapshot.orbit_x + getattr(snapshot, "roll", 0.0)
+                    # Orbit lock intentionally consumes only the relative orbit
+                    # vector. Distance/zoom and roll are ignored while held.
+                    motion_x = snapshot.orbit_x
                     motion_y = snapshot.orbit_y
+                    if not orbit_lock_active:
+                        motion_x += getattr(snapshot, "roll", 0.0)
                     self._emit_motion_locked(motion_x, motion_y)
                 elif pan:
                     self._emit_motion_locked(snapshot.pan_x, snapshot.pan_y)
@@ -353,7 +380,11 @@ class NavigationInputController:
                     self._state = InputState.ZOOMING
                 else:
                     self._state = InputState.NAVIGATION_READY
-                self._message = f"{profile.name}: {self._state.value.lower()}"
+                self._message = (
+                    f"{profile.name}: orbit lock"
+                    if orbit_lock_active
+                    else f"{profile.name}: {self._state.value.lower()}"
+                )
                 self._error = ""
                 return self.status
             except Exception as exc:  # pragma: no cover - backend/platform dependent
