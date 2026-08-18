@@ -27,8 +27,8 @@ class AppSettings:
 
     camera_index: int = 0
     detection_enabled: bool = True
-    touch_threshold: float = 0.065
-    touch_duration_ms: int = 150
+    touch_threshold: float = 0.10
+    touch_duration_ms: int = 0
     cooldown_ms: int = 500
     shortcut: str = DEFAULT_SHORTCUT
     preview_visible: bool = True
@@ -44,8 +44,8 @@ class AppSettings:
             raise SettingsError("Camera index must be zero or greater.")
         if not 0.01 <= self.touch_threshold <= 0.5:
             raise SettingsError("Touch threshold must be between 0.01 and 0.50.")
-        if not 20 <= self.touch_duration_ms <= 5000:
-            raise SettingsError("Touch duration must be between 20 and 5000 ms.")
+        if not 0 <= self.touch_duration_ms <= 5000:
+            raise SettingsError("Touch duration must be between 0 and 5000 ms.")
         if not 50 <= self.cooldown_ms <= 10000:
             raise SettingsError("Cooldown must be between 50 and 10000 ms.")
         if not self.shortcut.strip():

@@ -5,8 +5,8 @@ specific gesture:
 
 > **INDEX FINGER TIP → NOSE**
 
-When the fingertip stays inside the nose touch zone for the configured duration,
-Gestures presses one configurable keyboard shortcut. It fires once, enters a
+When the fingertip enters the forgiving nose touch zone, Gestures immediately
+presses one configurable keyboard shortcut by default. It fires once, enters a
 cooldown/release state, and will not fire again until the fingertip has moved away.
 
 All camera capture, MediaPipe inference, landmark smoothing, calibration, and
@@ -95,8 +95,10 @@ To stop capture and release the camera, press **Stop**. When stopped or when
    after the window opened.
 2. Enter a shortcut, for example `Alt + Tab`, `Ctrl + C`,
    `Ctrl + Shift + S`, `Space`, or `Escape`.
-3. Set the relative touch threshold, hold duration, and cooldown. The default
-   hold duration is 150 ms and the default cooldown is 500 ms.
+3. Set the relative touch threshold, activation delay, and cooldown. The default
+   touch zone is 0.10 of face width and the default activation delay is 0 ms,
+   so the shortcut fires on the first qualifying frame. The default cooldown is
+   500 ms.
 4. Press **Start Detection**.
 5. Optionally press **Calibrate**. Keep your face still during the first phase,
    then touch the nose with the index fingertip and hold. The measured relative
@@ -130,8 +132,10 @@ relative touch zone are drawn on the preview. Debug diagnostics also show:
   webcam.
 - A moving average over five frames reduces jitter. The detector reports
   `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`.
-- A touch must remain inside the configured threshold for the required duration.
-  After the shortcut is sent, a cooldown and a separate release hysteresis
+- The default touch threshold is 0.10 of face width, and it can be increased
+  from the settings panel for an even larger activation zone.
+- The default activation delay is 0 ms, so the first qualifying frame triggers
+  the shortcut. After it is sent, a cooldown and a separate release hysteresis
   require the fingertip to move outside the zone before a new trigger is armed.
 
 This is an inference-only application. It does not train a custom model and

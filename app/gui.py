@@ -205,14 +205,14 @@ class GesturesApp:
             "Touch threshold (relative)",
             self.threshold_var,
             0.01,
-            0.18,
+            0.25,
             0.005,
         )
         self._scale_control(
             sidebar,
-            "Required touch duration (ms)",
+            "Activation delay (ms)",
             self.duration_var,
-            20,
+            0,
             1000,
             10,
         )
