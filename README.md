@@ -1,41 +1,72 @@
-<p align="center">
-  <img src="p/gestures.pn.png" width="500">
-</p>
+# Gestures — local nose-touch shortcut controller
 
+Gestures is a Windows desktop application that watches the laptop webcam for one
+specific gesture:
 
-## This is a project that takes your hand location and face location and tracks them to see when they overlap.
+> **INDEX FINGER TIP → NOSE**
 
-When the fingertip enters the forgiving nose touch zone, Gestures immediately
-presses one configurable keyboard shortcut by default. It fires once, enters a
+When the fingertip stays inside the nose touch zone for the configured duration,
+Gestures presses one configurable keyboard shortcut. It fires once, enters a
 cooldown/release state, and will not fire again until the fingertip has moved away.
 
-### QuickStart
-##### In a folder of your choosing
+All camera capture, MediaPipe inference, landmark smoothing, calibration, and
+keyboard input run on the local computer. Camera frames are not uploaded,
+stored, logged, or sent to a cloud service.
 
-```
-gh repo clone lllons/Gestures
-```
-##### In the same folder
-```
-python -m venv venv
-```
-##### Then..
-```
-venv\Scripts\activate
-```
-##### Then...
-```
+## Requirements
+
+- Windows 10 or Windows 11
+- Python 3.10–3.12 (64-bit recommended; these versions have the broadest MediaPipe wheel support)
+- A working webcam and permission for desktop applications to use it
+- Internet access only during the one-time Python package/model installation
+  (after that, the app is local/offline)
+
+The UI uses Python's built-in Tkinter. Computer vision uses OpenCV and the
+MediaPipe Tasks Hand Landmarker and Face Landmarker. Keyboard events use
+`pynput`.
+
+## Setup on Windows
+
+Open PowerShell in the repository root:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-```
-##### Then....
-```
 python scripts\download_models.py
 ```
-##### Then.....
+
+If PowerShell blocks activation, either run this once as the current user:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
+
+or use the interpreter directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe scripts\download_models.py
+```
+
+The model helper downloads the official local task bundles to:
+
+```text
+models\hand_landmarker.task
+models\face_landmarker.task
+```
+
+Those files are needed by MediaPipe at runtime. They are deliberately not
+bundled in the repository because of their size. Do not download camera or
+model data from inside the application; the app fails with a clear message if a
+model file is missing.
+
+## Run
+
+```powershell
 python -m app.main
 ```
-Once you run this last command the GUI will launch and all you need to do it press **"START"**
 
 The application does not open the webcam until **Start Detection** is pressed.
 
@@ -64,10 +95,8 @@ To stop capture and release the camera, press **Stop**. When stopped or when
    after the window opened.
 2. Enter a shortcut, for example `Alt + Tab`, `Ctrl + C`,
    `Ctrl + Shift + S`, `Space`, or `Escape`.
-3. Set the relative touch threshold, activation delay, and cooldown. The default
-   touch zone is 0.10 of face width and the default activation delay is 0 ms,
-   so the shortcut fires on the first qualifying frame. The default cooldown is
-   500 ms.
+3. Set the relative touch threshold, hold duration, and cooldown. The default
+   hold duration is 150 ms and the default cooldown is 500 ms.
 4. Press **Start Detection**.
 5. Optionally press **Calibrate**. Keep your face still during the first phase,
    then touch the nose with the index fingertip and hold. The measured relative
@@ -101,16 +130,12 @@ relative touch zone are drawn on the preview. Debug diagnostics also show:
   webcam.
 - A moving average over five frames reduces jitter. The detector reports
   `READY`, `APPROACHING`, `TOUCH DETECTED`, and `COOLDOWN`.
-- The default touch threshold is 0.10 of face width, and it can be increased
-  from the settings panel for an even larger activation zone.
-- The default activation delay is 0 ms, so the first qualifying frame triggers
-  the shortcut. After it is sent, a cooldown and a separate release hysteresis
+- A touch must remain inside the configured threshold for the required duration.
+  After the shortcut is sent, a cooldown and a separate release hysteresis
   require the fingertip to move outside the zone before a new trigger is armed.
 
 This is an inference-only application. It does not train a custom model and
 contains no cloud AI or language-model feature.
-
-----
 
 ## Settings storage and privacy
 
@@ -171,8 +196,6 @@ permission the first time.
   camera consumers, and allow MediaPipe to run on the CPU. The application does
   not require a dedicated GPU.
 
-----
-
 ## Project layout
 
 ```text
@@ -195,5 +218,3 @@ scripts/
     download_models.py
 requirements.txt
 ```
-
-Licence MIT
