@@ -74,7 +74,7 @@ class GesturesApp:
         self.cooldown_var = tk.DoubleVar(value=self.settings.cooldown_ms)
 
         self.status_var = tk.StringVar(value="READY")
-        self.detail_var = tk.StringVar(value="Press Start Detection to begin.")
+        self.detail_var = tk.StringVar(value="")
         self.hand_var = tk.StringVar(value="Not detected")
         self.face_var = tk.StringVar(value="Not detected")
         self.distance_var = tk.StringVar(value="—")
@@ -92,9 +92,6 @@ class GesturesApp:
             pass
         style.configure("App.TFrame", background=self.BG)
         style.configure("Panel.TFrame", background=self.PANEL)
-        style.configure("Title.TLabel", background=self.BG, foreground=self.TEXT, font=("Segoe UI", 20, "bold"))
-        style.configure("Subtitle.TLabel", background=self.BG, foreground=self.MUTED, font=("Segoe UI", 10))
-        style.configure("PanelTitle.TLabel", background=self.PANEL, foreground=self.TEXT, font=("Segoe UI", 11, "bold"))
         style.configure("Panel.TLabel", background=self.PANEL, foreground=self.TEXT, font=("Segoe UI", 10))
         style.configure("Muted.TLabel", background=self.PANEL, foreground=self.MUTED, font=("Segoe UI", 9))
         style.configure("Metric.TLabel", background=self.PANEL, foreground=self.ACCENT, font=("Segoe UI", 11, "bold"))
@@ -109,37 +106,25 @@ class GesturesApp:
         outer.pack(fill=tk.BOTH, expand=True)
         outer.columnconfigure(0, weight=1)
         outer.columnconfigure(1, weight=0)
-        outer.rowconfigure(1, weight=1)
-
-        ttk.Label(outer, text="GESTURES", style="Title.TLabel").grid(
-            row=0, column=0, sticky="w", pady=(0, 2)
-        )
-        ttk.Label(
-            outer,
-            text="A private, local nose-touch shortcut controller",
-            style="Subtitle.TLabel",
-        ).grid(row=0, column=0, sticky="w", pady=(38, 0))
+        outer.rowconfigure(0, weight=1)
 
         preview_section = ttk.Frame(outer, style="App.TFrame")
-        preview_section.grid(row=1, column=0, sticky="nsew", padx=(0, 18), pady=(20, 0))
-        preview_section.rowconfigure(1, weight=1)
+        preview_section.grid(row=0, column=0, sticky="nsew", padx=(0, 18))
+        preview_section.rowconfigure(0, weight=1)
         preview_section.columnconfigure(0, weight=1)
-        ttk.Label(preview_section, text="CAMERA PREVIEW", style="Subtitle.TLabel").grid(
-            row=0, column=0, sticky="w", pady=(0, 8)
-        )
         self.preview_label = tk.Label(
             preview_section,
-            text="Camera stopped\n\nPress Start Detection to begin",
+            text="Camera stopped",
             bg="#0b1014",
             fg=self.MUTED,
             font=("Segoe UI", 14),
             compound=tk.CENTER,
             anchor=tk.CENTER,
         )
-        self.preview_label.grid(row=1, column=0, sticky="nsew")
+        self.preview_label.grid(row=0, column=0, sticky="nsew")
 
         actions = ttk.Frame(preview_section, style="App.TFrame")
-        actions.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        actions.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         ttk.Button(
@@ -156,20 +141,13 @@ class GesturesApp:
             textvariable=self.air_mouse_button_var,
             command=self.toggle_air_mouse,
         )
-        self.air_mouse_button.grid(row=3, column=0, sticky="ew", pady=(8, 0))
-        ttk.Label(
-            preview_section,
-            text="Air Mouse: index finger controls the pointer; pinch thumb + index to click; spread index + middle and move to scroll.",
-            style="Subtitle.TLabel",
-            wraplength=760,
-            justify=tk.LEFT,
-        ).grid(row=4, column=0, sticky="w", pady=(5, 0))
+        self.air_mouse_button.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         self._build_sidebar(outer)
 
     def _build_sidebar(self, parent: ttk.Frame) -> None:
         sidebar = ttk.Frame(parent, style="Panel.TFrame")
-        sidebar.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        sidebar.grid(row=0, column=1, sticky="nsew")
         sidebar.configure(width=350)
 
         self.sidebar_canvas = tk.Canvas(
@@ -220,13 +198,9 @@ class GesturesApp:
             self.sidebar_canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _build_sidebar_content(self, sidebar: ttk.Frame) -> None:
-        ttk.Label(sidebar, text="LIVE STATUS", style="PanelTitle.TLabel").pack(anchor="w")
         status_row = ttk.Frame(sidebar, style="Panel.TFrame")
-        status_row.pack(fill=tk.X, pady=(8, 2))
+        status_row.pack(fill=tk.X, pady=(0, 2))
         ttk.Label(status_row, textvariable=self.status_var, style="Metric.TLabel").pack(side=tk.LEFT)
-        ttk.Label(status_row, text="index fingertip → nose", style="Muted.TLabel").pack(
-            side=tk.RIGHT, pady=3
-        )
         ttk.Label(
             sidebar,
             textvariable=self.detail_var,
@@ -246,7 +220,6 @@ class GesturesApp:
         self._metric(metrics, "Scroll", self.scroll_var, 6)
 
         ttk.Separator(sidebar).pack(fill=tk.X, pady=(0, 15))
-        ttk.Label(sidebar, text="SETTINGS", style="PanelTitle.TLabel").pack(anchor="w", pady=(0, 8))
 
         camera_row = ttk.Frame(sidebar, style="Panel.TFrame")
         camera_row.pack(fill=tk.X, pady=3)
@@ -293,13 +266,6 @@ class GesturesApp:
             format_value=lambda value: f"{value * 100:.0f}%",
             command=self._apply_settings_live,
         )
-        ttk.Label(
-            sidebar,
-            text="The red circle on the preview is the zone: keep it large enough that your fingertip lands inside when you touch your nose. Drag to resize — no restart needed.",
-            style="Muted.TLabel",
-            wraplength=310,
-            justify=tk.LEFT,
-        ).pack(anchor="w", pady=(0, 2))
         self._scale_control(
             sidebar,
             "Activation delay (ms)",
@@ -319,13 +285,6 @@ class GesturesApp:
 
         self._shortcut_control(sidebar, "Nose touch key", self.shortcut_var)
         self._shortcut_control(sidebar, "Thumb + index key", self.pinch_shortcut_var)
-        ttk.Label(
-            sidebar,
-            text="Dropdowns include common shortcuts, letters, numbers, arrows, and function keys.",
-            style="Muted.TLabel",
-            wraplength=310,
-        ).pack(anchor="w", pady=(0, 10))
-
         secondary = ttk.Frame(sidebar, style="Panel.TFrame")
         secondary.pack(fill=tk.X, pady=(0, 10))
         ttk.Button(secondary, text="Apply Settings", command=self._apply_settings).pack(
@@ -335,7 +294,6 @@ class GesturesApp:
             side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0)
         )
 
-        ttk.Label(sidebar, text="DEBUG", style="PanelTitle.TLabel").pack(anchor="w", pady=(4, 5))
         self.debug_box = tk.Text(
             sidebar,
             height=8,
@@ -350,7 +308,7 @@ class GesturesApp:
             pady=7,
             state=tk.DISABLED,
         )
-        self.debug_box.pack(fill=tk.BOTH, expand=True)
+        self.debug_box.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
     def _set_air_mouse_button_text(self) -> None:
         self.air_mouse_button_var.set(
@@ -511,7 +469,7 @@ class GesturesApp:
             self.worker.update_settings(settings)
         self.detail_var.set("Settings saved locally.")
         if not settings.preview_visible:
-            self._show_preview_placeholder("Camera preview hidden\n\nDetection can continue in the background")
+            self._show_preview_placeholder("Camera preview hidden")
         return True
 
     def start(self) -> None:
@@ -526,7 +484,7 @@ class GesturesApp:
         self._calibration_active = False
         self.status_var.set("STOPPED")
         self.detail_var.set("Camera released. No keyboard input is sent while stopped.")
-        self._show_preview_placeholder("Camera stopped\n\nPress Start Detection to begin")
+        self._show_preview_placeholder("Camera stopped")
         self.hand_var.set("Not detected")
         self.face_var.set("Not detected")
         self.distance_var.set("—")
@@ -644,7 +602,7 @@ class GesturesApp:
         if result.preview_frame is not None and self.preview_var.get():
             self._show_frame(result.preview_frame)
         elif not self.preview_var.get():
-            self._show_preview_placeholder("Camera preview hidden\n\nDetection can continue in the background")
+            self._show_preview_placeholder("Camera preview hidden")
 
     def _update_debug(self, result: FrameResult) -> None:
         snapshot = result.snapshot
