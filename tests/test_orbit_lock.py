@@ -171,6 +171,86 @@ class OrbitLockDetectionTests(unittest.TestCase):
         self.assertEqual(result.zoom, 0.0)
         self.assertEqual(result.pan_x, 0.0)
 
+    def test_release_rebases_with_confidence_and_reactivates_repeatedly(self) -> None:
+        navigation = TwoHandNavigation(self.settings)
+        backend = FakeBackend()
+        controller = NavigationInputController(self.settings, backend)
+        try:
+            for cycle in range(20):
+                now = cycle * 0.3
+                left_x = 0.30 + (cycle % 2) * 0.02
+                right_x = 0.70 + (cycle % 2) * 0.02
+                locked_hands = [
+                    hand(left_x, 0.5, "Left", ring_distance=0.02),
+                    hand(right_x, 0.5, "Right", ring_distance=0.02),
+                ]
+                locked = navigation.process(locked_hands, now=now)
+                self.assertTrue(locked.orbit_lock_active)
+                self.assertAlmostEqual(locked.confidence, 0.95)
+                self.assertEqual(controller.apply(locked).held_buttons, ("middle",))
+
+                moved_hands = [
+                    hand(left_x + 0.04, 0.5, "Left", ring_distance=0.02),
+                    hand(right_x + 0.04, 0.5, "Right", ring_distance=0.02),
+                ]
+                moved = navigation.process(moved_hands, now=now + 0.05)
+                self.assertGreater(moved.orbit_x, 0.0)
+                controller.apply(moved)
+
+                released = navigation.process(
+                    [
+                        hand(left_x + 0.04, 0.5, "Left", ring_distance=0.06),
+                        hand(right_x + 0.04, 0.5, "Right", ring_distance=0.06),
+                    ],
+                    now=now + 0.10,
+                )
+                status = controller.apply(released)
+                self.assertFalse(released.orbit_lock_active)
+                self.assertAlmostEqual(released.confidence, 0.95)
+                self.assertEqual(
+                    released.message,
+                    "Orbit lock released; movement baseline reset",
+                )
+                self.assertEqual(status.held_buttons, ())
+
+            release_events = [
+                event for event in backend.events if event[0] == "release_button"
+            ]
+            self.assertEqual(len(release_events), 20)
+        finally:
+            controller.close()
+
+    def test_tracking_loss_releases_orbit_and_allows_reactivation(self) -> None:
+        navigation = TwoHandNavigation(self.settings)
+        backend = FakeBackend()
+        controller = NavigationInputController(self.settings, backend)
+        try:
+            locked = navigation.process(
+                [
+                    hand(0.3, 0.5, "Left", ring_distance=0.02),
+                    hand(0.7, 0.5, "Right", ring_distance=0.02),
+                ],
+                now=0.0,
+            )
+            self.assertEqual(controller.apply(locked).held_buttons, ("middle",))
+
+            lost = navigation.process([], now=0.1)
+            lost_status = controller.apply(lost)
+            self.assertFalse(lost.orbit_lock_active)
+            self.assertEqual(lost.confidence, 0.0)
+            self.assertEqual(lost_status.held_buttons, ())
+
+            returned = navigation.process(
+                [hand(0.4, 0.5, "Left", ring_distance=0.02)],
+                now=0.2,
+            )
+            returned_status = controller.apply(returned)
+            self.assertTrue(returned.orbit_lock_active)
+            self.assertAlmostEqual(returned.confidence, 0.95)
+            self.assertEqual(returned_status.held_buttons, ("middle",))
+        finally:
+            controller.close()
+
 
 class OrbitLockInputPriorityTests(unittest.TestCase):
     def test_lock_owns_button_and_suppresses_pan_and_zoom(self) -> None:

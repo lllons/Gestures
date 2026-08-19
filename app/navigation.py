@@ -608,6 +608,7 @@ class TwoHandNavigation:
                 raw_centers=raw_centers,
                 raw_midpoint=raw_midpoint,
                 raw_distance=raw_distance,
+                confidence=confidence,
                 outlier_rejected=outlier_rejected,
                 message="Orbit lock released; movement baseline reset",
             )
