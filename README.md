@@ -1,6 +1,5 @@
 <p align="center">
-  <img src="p/gestures.pn.png" width="500">
-</p>
+ 
 
 
 ## This is a project that takes your hand location and face location and tracks them to see when they overlap.
